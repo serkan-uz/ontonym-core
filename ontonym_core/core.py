@@ -46,6 +46,7 @@ async def extract_classes(
     *,
     backend: BackendLike = "ollama",
     prior: ClassExtraction | None = None,
+    candidate_class_names: list[str] | None = None,
 ) -> ClassExtraction:
     """Run the class-level extraction pass on `text`.
 
@@ -53,9 +54,18 @@ async def extract_classes(
     session — the LLM uses it to avoid re-emitting classes / properties /
     actions / relationships / rules that already exist. Pass `None` (default)
     for a fresh session.
+
+    `candidate_class_names` is an optional hint — pre-computed names
+    (semantic search, frequency, hand-picked) that the prompt surfaces under
+    a STRONG CANDIDATES preamble so the LLM is biased toward reuse over
+    invention.
     """
     b = _resolve_backend(backend)
-    return await b.extract_classes(text, prior or ClassExtraction())
+    return await b.extract_classes(
+        text,
+        prior or ClassExtraction(),
+        candidate_class_names=candidate_class_names,
+    )
 
 
 async def extract_objects(
@@ -64,6 +74,9 @@ async def extract_objects(
     *,
     backend: BackendLike = "ollama",
     prior: ObjectExtraction | None = None,
+    candidate_object_names: list[str] | None = None,
+    max_classes_in_prompt: int | None = None,
+    class_mention_counts: dict[str, int] | None = None,
 ) -> ObjectExtraction:
     """Run the object-level extraction pass on `text` against `schema`.
 
@@ -73,9 +86,20 @@ async def extract_objects(
     relationship types not declared on the schema.
 
     `prior` is the accumulated object graph; pass `None` for a fresh session.
+
+    `candidate_object_names`, `max_classes_in_prompt`, `class_mention_counts`
+    are optional prompt-shaping hints — see the `Backend` protocol for the
+    details.
     """
     b = _resolve_backend(backend)
-    return await b.extract_objects(text, schema, prior or ObjectExtraction())
+    return await b.extract_objects(
+        text,
+        schema,
+        prior or ObjectExtraction(),
+        candidate_object_names=candidate_object_names,
+        max_classes_in_prompt=max_classes_in_prompt,
+        class_mention_counts=class_mention_counts,
+    )
 
 
 async def extract(

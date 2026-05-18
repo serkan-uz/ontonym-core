@@ -23,6 +23,10 @@ from .llm import (
     OllamaBackend,
     parse_class_json,
     parse_object_json,
+    render_class_schema,
+    render_known_classes,
+    render_known_objects,
+    render_previous_context,
 )
 from .schema import (
     Action,
@@ -40,7 +44,7 @@ from .schema import (
     Rule,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     # High-level API
@@ -54,6 +58,11 @@ __all__ = [
     # Parsers (for testing / custom flows)
     "parse_class_json",
     "parse_object_json",
+    # Prompt rendering helpers (for callers building their own prompts on top)
+    "render_known_classes",
+    "render_previous_context",
+    "render_class_schema",
+    "render_known_objects",
     # Schema
     "Class",
     "Property",

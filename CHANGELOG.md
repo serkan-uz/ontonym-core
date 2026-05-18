@@ -2,6 +2,24 @@
 
 All notable changes to ontonym-core will be documented here.
 
+## 0.2.0 — 2026-05-18
+
+Optional prompt-shaping hints — backwards-compatible additions to the
+public API. No changes to existing call sites; all new kwargs default to
+`None` and preserve 0.1.0 behaviour when omitted.
+
+- `extract_classes(..., candidate_class_names=None)` — when supplied, the
+  prompt surfaces a STRONG CANDIDATES preamble so the LLM is biased toward
+  reusing one of the named classes rather than inventing a synonym. Useful
+  when the caller has its own way of computing semantic-similar candidates
+  (vector search, frequency, hand-picked).
+- `extract_objects(..., candidate_object_names=None, max_classes_in_prompt=None, class_mention_counts=None)` —
+  same candidate-hint mechanism for objects, plus schema-trimming knobs:
+  with `max_classes_in_prompt=K`, the rendered schema shows full per-class
+  property listings only for the top-K classes by `class_mention_counts`
+  (rest are name-only but still legal in the output).
+- `Backend` protocol updated with the new kwargs.
+
 ## 0.1.0 — 2026-05-18
 
 Initial public release.

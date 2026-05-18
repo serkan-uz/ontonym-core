@@ -50,14 +50,35 @@ _OBJECT_PROMPT_PATH = _PROMPTS_DIR / "object.txt"
 
 
 class Backend(Protocol):
-    """Minimal interface every backend implements."""
+    """Minimal interface every backend implements.
+
+    `candidate_class_names` / `candidate_object_names` are optional hints —
+    pre-computed name lists (from semantic search, frequency, or hand-picked)
+    that the prompt surfaces under a STRONG CANDIDATES preamble so the LLM
+    is biased toward reuse over invention.
+
+    `max_classes_in_prompt` + `class_mention_counts` (object pass only) trim
+    the schema rendered into the prompt for very large ontologies — top-K
+    classes by mention count get full detail, the tail is name-only.
+    """
 
     async def extract_classes(
-        self, text: str, prior: ClassExtraction
+        self,
+        text: str,
+        prior: ClassExtraction,
+        *,
+        candidate_class_names: list[str] | None = None,
     ) -> ClassExtraction: ...
 
     async def extract_objects(
-        self, text: str, schema: ClassExtraction, prior: ObjectExtraction
+        self,
+        text: str,
+        schema: ClassExtraction,
+        prior: ObjectExtraction,
+        *,
+        candidate_object_names: list[str] | None = None,
+        max_classes_in_prompt: int | None = None,
+        class_mention_counts: dict[str, int] | None = None,
     ) -> ObjectExtraction: ...
 
     async def check_health(self) -> dict[str, Any]: ...
@@ -68,19 +89,42 @@ class Backend(Protocol):
 # ----------------------------------------------------------------------------
 
 
-def _render_known_classes(prior: ClassExtraction) -> str:
-    if not prior.classes:
-        return "(none yet — no constraint, pick whatever class fits)"
-    names: list[str] = []
-    for c in prior.classes:
-        if c.inherited_from:
-            names.append(f"{c.name} (inherits {c.inherited_from})")
-        else:
-            names.append(c.name)
-    return ", ".join(names)
+def render_known_classes(
+    prior: ClassExtraction,
+    *,
+    candidates: list[str] | None = None,
+) -> str:
+    """Render the known-classes hint for the class-pass prompt.
+
+    When `candidates` is non-empty, the names land under a STRONG CANDIDATES
+    preamble so the LLM is biased toward reusing one of them rather than
+    inventing a near-synonym. The full existing class list is still rendered
+    as a secondary "All registered classes" line — the candidate list is a
+    *hint*, not a constraint. The caller is responsible for ranking; this
+    helper trusts whatever order it receives.
+    """
+    full = (
+        ", ".join(
+            f"{c.name} (inherits {c.inherited_from})" if c.inherited_from else c.name
+            for c in prior.classes
+        )
+        if prior.classes
+        else "(none yet — no constraint, pick whatever class fits)"
+    )
+    if not candidates:
+        return full
+    seen: set[str] = set()
+    deduped = [c for c in candidates if not (c in seen or seen.add(c))]
+    return (
+        "STRONG CANDIDATES (semantically similar to this text — "
+        "reuse one of these unless none fits): "
+        + ", ".join(deduped)
+        + "\nAll registered classes: "
+        + full
+    )
 
 
-def _render_previous_context(prior: ClassExtraction, max_items: int = 30) -> str:
+def render_previous_context(prior: ClassExtraction, max_items: int = 30) -> str:
     if not prior.classes and not prior.relationships and not prior.rules:
         return "(no previous context — first text in this session)"
     lines: list[str] = []
@@ -116,7 +160,23 @@ def _render_previous_context(prior: ClassExtraction, max_items: int = 30) -> str
     return "\n".join(lines)
 
 
-def _render_class_schema(schema: ClassExtraction) -> str:
+def render_class_schema(
+    schema: ClassExtraction,
+    *,
+    max_classes: int | None = None,
+    class_mention_counts: dict[str, int] | None = None,
+) -> str:
+    """Render the class-level ontology as a COMPACT allow-set for the object pass.
+
+    With `max_classes` set, only the top-K classes get detailed property
+    listings; remaining classes are listed by name only (still legal in
+    output, just no per-property breakdown). Ranking is by
+    `class_mention_counts` when supplied (highest first) — typically the
+    caller's count of how often each class has been mentioned in prior
+    ingestions. Without counts, ranking is the insertion order in `schema`.
+
+    Action and relationship type sets are always rendered in full.
+    """
     if not schema.classes:
         return "(no classes defined yet — instance extraction will return nothing)"
     props_by_class: dict[str, list[str]] = {}
@@ -125,8 +185,23 @@ def _render_class_schema(schema: ClassExtraction) -> str:
             f"{p.name}:{p.data_type or 'str'}"
         )
 
+    all_classes = list(schema.classes)
+    if max_classes is not None and len(all_classes) > max_classes:
+        counts = class_mention_counts or {}
+        ranked = sorted(all_classes, key=lambda c: counts.get(c.name, 0), reverse=True)
+        top_classes = ranked[:max_classes]
+        tail_classes = ranked[max_classes:]
+    else:
+        top_classes = all_classes
+        tail_classes = []
+
     lines: list[str] = ["# CLASSES — use as `class_name`"]
-    for cls in schema.classes:
+    if tail_classes:
+        lines.append(
+            f"# (showing the top {len(top_classes)} of {len(all_classes)} by "
+            f"mention count; tail of {len(tail_classes)} listed name-only)"
+        )
+    for cls in top_classes:
         own = props_by_class.get(cls.name, [])
         desc = f" — {cls.description}" if cls.description else ""
         inherits = f" (inherits {cls.inherited_from})" if cls.inherited_from else ""
@@ -134,6 +209,20 @@ def _render_class_schema(schema: ClassExtraction) -> str:
             lines.append(f"{cls.name}({', '.join(own)}){desc}{inherits}")
         else:
             lines.append(f"{cls.name}{desc}{inherits}")
+    if tail_classes:
+        lines.append("")
+        lines.append("# Less-mentioned classes (name only, also valid):")
+        chunk: list[str] = []
+        chunk_len = 0
+        for cls in tail_classes:
+            if chunk_len + len(cls.name) + 2 > 120 and chunk:
+                lines.append(", ".join(chunk))
+                chunk = []
+                chunk_len = 0
+            chunk.append(cls.name)
+            chunk_len += len(cls.name) + 2
+        if chunk:
+            lines.append(", ".join(chunk))
 
     action_names = sorted({a.name for a in schema.actions})
     rel_types = sorted({r.type for r in schema.relationships})
@@ -146,17 +235,40 @@ def _render_class_schema(schema: ClassExtraction) -> str:
     return "\n".join(lines).rstrip()
 
 
-def _render_known_objects(prior: ObjectExtraction, max_items: int = 60) -> str:
+def render_known_objects(
+    prior: ObjectExtraction,
+    *,
+    max_items: int = 60,
+    candidates: list[str] | None = None,
+) -> str:
+    """Render the known-objects hint for the object-pass prompt.
+
+    When `candidates` is non-empty, they're surfaced under a STRONG CANDIDATES
+    preamble — same shape as the class-pass candidate hint, but at the
+    instance level. Caller pre-computes these (semantic search, frequency,
+    hand-picked) and supplies the canonical names.
+    """
     all_items = list(prior.objects) + list(prior.events)
     if not all_items:
-        return "(none yet)"
-    rendered = [f"{o.class_name}:{o.name}" for o in all_items[:max_items]]
-    more = (
-        f" ... and {len(all_items) - max_items} more"
-        if len(all_items) > max_items
-        else ""
+        base = "(none yet)"
+    else:
+        rendered = [f"{o.class_name}:{o.name}" for o in all_items[:max_items]]
+        more = (
+            f" ... and {len(all_items) - max_items} more"
+            if len(all_items) > max_items
+            else ""
+        )
+        base = "Objects: " + ", ".join(rendered) + more
+    if not candidates:
+        return base
+    seen: set[str] = set()
+    deduped = [c for c in candidates if not (c in seen or seen.add(c))]
+    return (
+        "STRONG CANDIDATE OBJECTS (semantically similar — reuse if any fits): "
+        + ", ".join(deduped)
+        + "\n"
+        + base
     )
-    return "Objects: " + ", ".join(rendered) + more
 
 
 # ----------------------------------------------------------------------------
@@ -515,26 +627,50 @@ class OllamaBackend:
         return (data.get("response") or "").strip()
 
     async def extract_classes(
-        self, text: str, prior: ClassExtraction
+        self,
+        text: str,
+        prior: ClassExtraction,
+        *,
+        candidate_class_names: list[str] | None = None,
     ) -> ClassExtraction:
         prompt = (
             self._class_prompt
-            .replace("{previous_context}", _render_previous_context(prior))
-            .replace("{known_classes}", _render_known_classes(prior))
+            .replace("{previous_context}", render_previous_context(prior))
+            .replace(
+                "{known_classes}",
+                render_known_classes(prior, candidates=candidate_class_names),
+            )
             .replace("{text}", text)
         )
         raw = await self._generate(prompt)
         return parse_class_json(raw)
 
     async def extract_objects(
-        self, text: str, schema: ClassExtraction, prior: ObjectExtraction
+        self,
+        text: str,
+        schema: ClassExtraction,
+        prior: ObjectExtraction,
+        *,
+        candidate_object_names: list[str] | None = None,
+        max_classes_in_prompt: int | None = None,
+        class_mention_counts: dict[str, int] | None = None,
     ) -> ObjectExtraction:
         if not schema.classes:
             return ObjectExtraction()
         prompt = (
             self._object_prompt
-            .replace("{class_schema}", _render_class_schema(schema))
-            .replace("{known_objects}", _render_known_objects(prior))
+            .replace(
+                "{class_schema}",
+                render_class_schema(
+                    schema,
+                    max_classes=max_classes_in_prompt,
+                    class_mention_counts=class_mention_counts,
+                ),
+            )
+            .replace(
+                "{known_objects}",
+                render_known_objects(prior, candidates=candidate_object_names),
+            )
             .replace("{text}", text)
         )
         raw = await self._generate(prompt)
@@ -646,26 +782,50 @@ class AnthropicBackend:
         return raw_text
 
     async def extract_classes(
-        self, text: str, prior: ClassExtraction
+        self,
+        text: str,
+        prior: ClassExtraction,
+        *,
+        candidate_class_names: list[str] | None = None,
     ) -> ClassExtraction:
         prompt = (
             self._class_prompt
-            .replace("{previous_context}", _render_previous_context(prior))
-            .replace("{known_classes}", _render_known_classes(prior))
+            .replace("{previous_context}", render_previous_context(prior))
+            .replace(
+                "{known_classes}",
+                render_known_classes(prior, candidates=candidate_class_names),
+            )
             .replace("{text}", text)
         )
         raw = await self._invoke(prompt)
         return parse_class_json(raw)
 
     async def extract_objects(
-        self, text: str, schema: ClassExtraction, prior: ObjectExtraction
+        self,
+        text: str,
+        schema: ClassExtraction,
+        prior: ObjectExtraction,
+        *,
+        candidate_object_names: list[str] | None = None,
+        max_classes_in_prompt: int | None = None,
+        class_mention_counts: dict[str, int] | None = None,
     ) -> ObjectExtraction:
         if not schema.classes:
             return ObjectExtraction()
         prompt = (
             self._object_prompt
-            .replace("{class_schema}", _render_class_schema(schema))
-            .replace("{known_objects}", _render_known_objects(prior))
+            .replace(
+                "{class_schema}",
+                render_class_schema(
+                    schema,
+                    max_classes=max_classes_in_prompt,
+                    class_mention_counts=class_mention_counts,
+                ),
+            )
+            .replace(
+                "{known_objects}",
+                render_known_objects(prior, candidates=candidate_object_names),
+            )
             .replace("{text}", text)
         )
         raw = await self._invoke(prompt)
