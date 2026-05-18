@@ -1,0 +1,64 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ontonym-core"
+version = "0.1.0"
+description = "Turn free text into a typed object graph — classes, objects, properties, actions, relationships, rules, and events — with any LLM."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{ name = "Serkan Uz" }]
+keywords = ["llm", "ontology", "extraction", "knowledge-graph", "ollama", "anthropic"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "pydantic>=2.0,<3.0",
+  "httpx>=0.27",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic>=0.40.0"]
+server = ["fastapi>=0.110", "uvicorn[standard]>=0.29"]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.23",
+  "ruff>=0.5",
+  "build",
+]
+
+[project.urls]
+Homepage = "https://ontonym.com"
+Repository = "https://github.com/serkan-uz/ontonym-core"
+Issues = "https://github.com/serkan-uz/ontonym-core/issues"
+
+[project.scripts]
+ontonym-core = "ontonym_core.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ontonym_core"]
+
+[tool.hatch.build.targets.wheel.shared-data]
+"ontonym_core/prompts" = "ontonym_core/prompts"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

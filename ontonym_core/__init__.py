@@ -1,0 +1,71 @@
+"""ontonym-core — turn free text into a typed object graph.
+
+Quickstart:
+
+    import asyncio
+    from ontonym_core import extract
+
+    result = asyncio.run(extract(
+        "Sarah deployed PaymentService to production at 14:02. "
+        "An outage at 14:05 affected the payments flow.",
+        backend="ollama",
+    ))
+    print(result.model_dump_json(indent=2))
+
+See README.md for the full API.
+"""
+from __future__ import annotations
+
+from .core import extract, extract_classes, extract_objects
+from .llm import (
+    AnthropicBackend,
+    Backend,
+    OllamaBackend,
+    parse_class_json,
+    parse_object_json,
+)
+from .schema import (
+    Action,
+    Class,
+    ClassExtraction,
+    Event,
+    Extraction,
+    ObjectAction,
+    ObjectExtraction,
+    ObjectInstance,
+    ObjectProperty,
+    ObjectRelationship,
+    Property,
+    Relationship,
+    Rule,
+)
+
+__version__ = "0.1.0"
+
+__all__ = [
+    # High-level API
+    "extract",
+    "extract_classes",
+    "extract_objects",
+    # Backends
+    "Backend",
+    "OllamaBackend",
+    "AnthropicBackend",
+    # Parsers (for testing / custom flows)
+    "parse_class_json",
+    "parse_object_json",
+    # Schema
+    "Class",
+    "Property",
+    "Action",
+    "Relationship",
+    "Rule",
+    "ClassExtraction",
+    "ObjectInstance",
+    "Event",
+    "ObjectProperty",
+    "ObjectAction",
+    "ObjectRelationship",
+    "ObjectExtraction",
+    "Extraction",
+]
