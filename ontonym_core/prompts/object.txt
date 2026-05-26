@@ -3,6 +3,7 @@ The class-level ontology below is FIXED — your job is to find EVERY specific i
 Object instances split into two top-level collections:
 `objects` (regular instances like a person, application, repository) and `events` (instances of an event-class — actor-less time-anchored happenings like an outage, deployment, release, decision).
 
+{reenrich_directive}
 # WHAT IS AN OBJECT (read carefully — this overrides every other rule)
 
 An object is a specific, NAMED, PERSISTENT thing with stable identity over time.
@@ -31,6 +32,71 @@ across legitimate instances. If a thing IS an object by the rules above, emit
 it even if mentioned only once, in passing, without an explicit name prefix.
 Do not be conservative about real entities — only about non-entities.
 
+NAMES ARE NEVER DROPPED: every proper personal name in the text MUST become a
+`person` object — full name, first name alone, or title+surname ("Marie
+Lowenthal", "Councilmember Dombroski", "Dr Blaney"). Emit the person EVEN IF
+their role or action is unclear, they are mentioned once, or the surrounding
+text is garbled by transcription errors (spoken-transcript noise like
+"a second device. Marie Lowenthal" still means Marie Lowenthal is a person —
+extract her). A missing name is a recall failure; when in doubt about a
+proper name, emit the person.
+
+# DOCUMENT SCOPE RULE — emit instances from substance, not from inventory.
+
+Emit an object ONLY when the document substantively says something about it —
+what it is, what it does, what's happening with it, who it acts on, what
+event involves it. The same scope test the class extractor uses applies here.
+
+IS — emit when the entity is part of the document's subject:
+  - The subject of the lede, headline, or hero block.
+  - A named campaign, sale, discount, offer, event, decision, or commitment
+    the document announces or records.
+  - A person, place, product, or system the subject acts on or is anchored to.
+  - The sender / author of a message (one object — the brand or person).
+
+IS NOT — skip when the entity appears only as:
+  - One label in a navigation menu, service grid, or category strip
+    ("My travel | Transfer | Car rentals | Parking | Hotel").
+  - A cross-sell strip listing the sender's other products / services.
+  - An app store badge, download link, social-media handle, or "follow us" row.
+  - A footer / legal / privacy / registration / address block.
+  - A hyperlinked label with no surrounding prose explaining it.
+The test: if every mention of this entity were deleted from the document,
+would the document still mean roughly the same thing? If yes — it was
+inventory, skip it.
+
+For promotional emails specifically: the SUBJECT is typically a campaign or
+offer announcement plus the product the offer applies to. Emit:
+  - the campaign / sale / promotion as ONE object (e.g. "wizz_22_birthday_sale"),
+  - the product or service the offer is for (e.g. "flight"),
+  - the discount mechanism if explicit (e.g. "wizz_22_birthday_discount"),
+  - the sending brand as ONE object (e.g. "wizz_air").
+Do NOT emit the sender's other unrelated services listed in the navigation
+menu, the loyalty programs in a cross-sell strip, the mobile app, the social
+handles, or the legal entity address block.
+
+
+# QUANTITATIVE & TEMPORAL FACTS ARE PROPERTIES
+
+Capture concrete quantitative and temporal facts as `properties` on the
+object they describe, EVEN when mentioned only once in passing. These are
+high-value for Q&A and easy to miss:
+  - Durations / time-spans: "running for three and a half years", "over the
+    last 6 months" → a property like `duration` = "three and a half years"
+    (data_type string; keep the unit in the value).
+  - Dates / years: "donated the park in 1908", "due by Friday" → `year`/
+    `due_at` (data_type date where parseable).
+  - Counts / amounts: "$550 million in home improvements", "across 28
+    counties", "2 million units" → a numeric property (data_type number, or
+    string when the unit/currency must be preserved, e.g. "$550 million").
+  - Identifiers: "item number 16", "Docket 1239", "Resolution 31669",
+    "Ordinance 2016 0392" → `item_number`/`docket_number`/`resolution_number`/
+    `ordinance_number` (string, preserve the exact token). ANY number likely
+    identifies the thing under discussion — capture it, never treat a number
+    as noise.
+Bind each to the specific object it characterises (the program, the project,
+the deal). If the schema lacks a suitable property name, use the closest
+existing one or a sensibly-named new one — do not drop the fact.
 
 # FOLLOW-UP LISTS ARE PROPERTIES, NOT OBJECTS
 
@@ -77,6 +143,61 @@ emit an event-class instance instead in the `events` array. If the schema
 does not include an event subclass for the kind of happening you see, drop
 it (class extraction will pick it up on a future ingestion).
 
+VERB-INSTANCE EMISSION (high-recall actions):
+
+For every sentence in the input where an actor object AND a target object are
+both resolvable from KNOWN OBJECTS or the current emit set, emit ONE entry in
+`actions[]` per transitive verb in the sentence. This is the mechanical bar
+that captures the connective tissue of who did/said/proposed/agreed what to
+whom — the load-bearing detail for downstream Q&A.
+
+Required fields per emission:
+  - `action_name` = the lemmatized verb (apply the same LEMMATIZATION RULE
+    described in the class prompt: presented → present, discussing → discuss,
+    agreed on → agree_on). Must match an action already declared in the
+    schema; if not present, drop silently.
+    HARD RULE: never emit a past-tense, gerund, or 3rd-person-singular form
+    as the `action_name`. If you catch yourself writing `presented` or
+    `agreeing` or `presents`, stop and convert to the infinitive.
+  - `actor` = canonical name of the subject object.
+  - `target` = canonical name of the direct or prepositional object.
+  - `occurred_at` = sentence-level timestamp if inferable from the text,
+    else null.
+  - `description` = a SPECIFIC, FACT-BEARING paraphrase of the sentence,
+    100–200 chars. This is the load-bearing field for Q&A — the reader
+    should be able to answer "what about X?" from the description alone.
+    Examples:
+      - BAD (vague): "discussed the service"
+      - GOOD (specific): "didn't stop the perinatal mental health service
+        but flagged inpatient-care shortage during the outbreak"
+      - BAD (verbatim quote): "Well, you know, I think we still kept it
+        running through everything..."
+      - GOOD (extracted gist): "kept service running through pandemic;
+        warned beds were insufficient and uptake was dropping"
+    The description IS the meaning we keep — the source sentence stays in
+    the source system per the "never persist source content" rule. Don't
+    quote verbatim; extract the gist.
+
+Multi-verb sentences ("Sarah said John would deploy X") produce one action
+per verb whose actor + target are both resolvable, in the order they appear:
+  - (sarah, say, john) — "Sarah reports John's planned deployment"
+  - (john, deploy, x)  — "John will deploy X" (modals/futures strip; the
+    description carries the modality)
+
+Skip verbs where actor or target cannot be resolved without inventing
+entities. Do NOT emit `(unknown, said, x)` or `(speaker_5, propose, mic)`
+placeholders.
+
+Skip auxiliaries, modals, copular, and pure-existence verbs (same list as
+the class prompt: be/have/do/get/let, can/could/will/would/shall/should/
+may/might/must/ought, is/are/was/were/seem/appear/become/remain, exist/
+occur/happen).
+
+DIFF-ONLY still applies to actions: a triple `(action, actor, target)` that
+already exists in KNOWN OBJECTS is deduplicated downstream, but each FRESH
+occurrence (different `occurred_at` or different `description`) is new
+content — emit it.
+
 # CANONICAL NAME RULES
 
 Object "name" is a canonical snake_case identifier. Derivation patterns:
@@ -112,6 +233,113 @@ DIFF-ONLY DOES NOT MEAN "EMIT NOTHING WHEN MOST THINGS ARE KNOWN". A new speaker
 a chat line, a new ticket id, a new branch name — any single new instance — is
 enough to require non-empty output. Brevity of the input is NEVER a reason to
 emit empty arrays. If even ONE entity is unfamiliar to KNOWN OBJECTS, emit it.
+
+# MEETING TRANSCRIPTS
+
+Meeting transcripts are the highest-yield source of decisions, commitments,
+findings, and discussion outcomes. They look like multi-speaker dialogue
+with speaker labels ("Professor B:", "PhD A:", "Marketing:", "Industrial
+Design:") or numbered turns. The text density of important content is much
+higher than email or chat — extract aggressively.
+
+RECOGNIZE THESE PATTERNS AS DECISIONS (emit `events[]` with class_name='decision'):
+  - First-person plural: "we'll go with X", "we agreed on X", "we decided to X",
+    "let's use X", "we should X", "we'll honour 10%"
+  - Passive voice: "it was decided that X", "it was agreed that X",
+    "the conclusion is X", "the result is X"
+  - Third-person plural: "they chose X", "they preferred X over Y"
+  - Reported findings: "the recognition results were good", "performance
+    was promising", "the test showed X" — these are FINDINGS, model them as
+    decisions whose `summary` describes the conclusion and whose
+    `description` carries the supporting context
+  - Proposed-and-accepted: "X proposed Y; we'll go with it" — one decision,
+    actor attribution via `reported_by` to the proposer
+A decision in a meeting does NOT require a single speaker with authority —
+group consensus, working-group conclusions, and reported findings all count.
+
+RECOGNIZE THESE PATTERNS AS COMMITMENTS (emit `events[]` with class_name='commitment'):
+  - "I'll X by <date>", "I will own X", "leave it with me"
+  - "X will do Y", "Sarah will handle the renewal"
+  - Assignments stated in the meeting: "<name> is going to <verb> <thing>"
+  - Promised follow-ups: "we'll circle back next week with X"
+
+RECOGNIZE THESE AS DISCUSSIONS (emit `events[]` with class_name='discussion'
+when the schema includes it, otherwise fold into `decision` with a
+descriptive summary):
+  - A topic block where multiple speakers exchange views without reaching
+    a firm decision ("we talked about X — A thinks Y, B thinks Z").
+  - Q&A pairs that record what someone thinks/believes/recommends about
+    a specific topic ("What did the professor think about X? — He said Y").
+  - Use the topic as the basis for the `name` (e.g. `voice_recognition_vs_handheld`,
+    `microphone_data_findings`). Put participating speakers as
+    `reported_by` relationships and the subject objects as `affected`.
+
+RECOGNIZE THESE AS ARGUMENTS + DISAGREEMENTS (emit `events[]` with
+class_name='argument'). An argument is a STANCE + its REASONING — NOT just
+a proposal. The proposal ("Nathan proposed titanium") is an action; the
+argument ("Nathan argued the remote must stay hand-holdable BECAUSE voice
+recognition is only an addition") is a separate event that carries the WHY.
+For each argument emit:
+  - one `events[]` entry, class_name='argument', snake_case `name` from the
+    position (e.g. `keep_hand_held_for_voice_limits`).
+  - `properties`: `claim` (the position, one sentence) and `reasoning`
+    (the conditional/defensive logic — the WHY). Optionally `stance`
+    (for/against/alternative).
+  - `relationships`: `reported_by` → the speaker; `about` → the topic object.
+
+A SINGLE speaker stating a belief/position with reasoning is ALSO an argument
+— no opposing side required. In a scrutiny / Q&A / interview meeting (a
+committee questioning officials, an interviewer probing a witness), each
+substantive "X believes/explains/argues that Y because Z" answer is an
+`argument`: emit it with `claim`=Y, `reasoning`=Z, `reported_by`=X, `about`=topic.
+Do NOT downgrade these to a bare `finding` (a finding has no stance/speaker
+reasoning) or leave them only as a `discussion` with an empty summary.
+
+ALWAYS populate the meaning-bearing property: `argument` needs `claim`+`reasoning`;
+`discussion`/`finding`/`decision` need a non-empty `summary`. An event object
+whose only content is its name slug is useless downstream — the summary/claim
+is the answer the graph must return.
+
+WHEN TWO PARTIES DISAGREE you MUST emit BOTH sides as separate `argument`
+events (each with its own claim + reasoning + reported_by) PLUS a
+`disagrees_with` relationship linking the two argument names. Capturing only
+the winning side, or only the proposal without the opposing reasoning, is a
+recall failure. Worked shape:
+  events[]:
+    {"class_name":"argument","name":"keep_hand_held_for_voice_limits",
+     "display_name":"ID: keep hand-held","description":"..."}
+    {"class_name":"argument","name":"drop_hand_held_for_voice_recognition",
+     "display_name":"UI: drop hand-held","description":"..."}
+  properties[]:
+    {"class_name":"argument","object_name":"keep_hand_held_for_voice_limits",
+     "name":"claim","value":"the remote must remain hand-holdable","data_type":"string"}
+    {"class_name":"argument","object_name":"keep_hand_held_for_voice_limits",
+     "name":"reasoning","value":"voice recognition is only an addition; not "
+     "everyone always uses it, so most of the time it is taken by hand","data_type":"string"}
+    {... same two properties for drop_hand_held_for_voice_recognition ...}
+  relationships[]:
+    {"source":"keep_hand_held_for_voice_limits","target":"industrial_designer",
+     "type":"reported_by","description":"..."}
+    {"source":"drop_hand_held_for_voice_recognition","target":"user_interface_designer",
+     "type":"reported_by","description":"..."}
+    {"source":"keep_hand_held_for_voice_limits","target":"drop_hand_held_for_voice_recognition",
+     "type":"disagrees_with","description":"opposing positions on whether the "
+     "remote needs a hand-held form"}
+
+QMSum-STYLE QUERIES the graph must answer. When you see a meeting passage,
+think about how each of these would be answered later — extract aggressively
+so the answers exist as concrete events:
+  - "Why did X disagree with Y about Z?" → emit BOTH `argument` events with
+    their `reasoning` + a `disagrees_with` edge (see above). This is the
+    primary case — do not settle for one-sided capture.
+  - "What did X think about Y?" → emit an `argument` (or `discussion`) with
+    X as `reported_by`, Y as `about`, and the opinion in `claim`/`reasoning`.
+  - "Summarize what was said about X" → emit one event per substantive
+    discussion/argument of X; the chat agent will aggregate them.
+
+RECALL BIAS for meetings: in a meeting transcript, err HARD toward emitting
+events. A meeting with 0 events extracted is almost always a recall failure —
+even short meetings produce 3-5 substantive decisions/discussions/commitments.
 
 # CHAT THREAD INPUTS
 

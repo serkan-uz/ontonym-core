@@ -44,6 +44,33 @@ _CLASS_PROMPT_PATH = _PROMPTS_DIR / "class.txt"
 _OBJECT_PROMPT_PATH = _PROMPTS_DIR / "object.txt"
 
 
+# Injected into the object prompt (at the `{reenrich_directive}` placeholder)
+# only when `extract_objects(..., reenrich=True)`. It SUSPENDS the diff-only
+# "skip known objects" rule so a re-extraction of an already-ingested document
+# re-attaches new per-instance facts (counts, durations, identifiers,
+# who-said-what) onto entities that already exist in the graph. This is the
+# fix for the diff-only-on-a-dense-graph enrichment ceiling: the first pass
+# discovers entities, a later re-enrichment pass fills facts onto them.
+_REENRICH_DIRECTIVE = """\
+=== RE-ENRICHMENT MODE — THIS OVERRIDES THE DIFF-ONLY OUTPUT RULE BELOW ===
+This document is ALREADY in the graph; its entities are mostly KNOWN. Your job
+on THIS pass is to ATTACH NEW FACTS to the known entities — facts an earlier,
+stricter pass skipped.
+- REUSE every canonical name from KNOWN OBJECTS exactly. Do NOT rename or
+  duplicate an existing entity. objects[] and events[] may be sparse on this
+  pass (most instances already exist) — that is expected and fine.
+- The diff-only "do NOT re-emit properties/actions/relationships for known
+  objects" restriction is SUSPENDED. Emit EVERY property, action, relationship,
+  and event the text supports for known objects: counts, durations, dates,
+  amounts, identifier numbers, who-said-what, arguments, disagreements,
+  decisions, commitments. properties[], actions[], relationships[], events[]
+  SHOULD BE RICH on this pass.
+- Downstream still deduplicates exact tuples, so restating a fact already
+  present is harmless — err toward emitting rather than skipping.
+=== END RE-ENRICHMENT MODE ===
+"""
+
+
 # ----------------------------------------------------------------------------
 # Backend protocol
 # ----------------------------------------------------------------------------
@@ -506,12 +533,20 @@ def parse_object_json(raw: str, schema: ClassExtraction) -> ObjectExtraction:
             continue
         if pname not in allowed_props_by_class.get(cls, set()):
             continue
+        raw_value = p.get("value")
+        # The DB column is TEXT (polymorphic per CLAUDE.md §3). LLMs often
+        # emit numeric / bool literals for number/boolean-typed properties;
+        # stringify so pydantic's str-only ObjectProperty.value accepts them.
+        if raw_value is None:
+            continue
+        if not isinstance(raw_value, str):
+            raw_value = json.dumps(raw_value) if isinstance(raw_value, (list, dict)) else str(raw_value)
         properties.append(
             ObjectProperty(
                 class_name=cls,
                 object_name=obj_name,
                 name=pname,
-                value=p.get("value"),
+                value=raw_value,
                 data_type=p.get("data_type"),
             )
         )
@@ -654,6 +689,7 @@ class OllamaBackend:
         candidate_object_names: list[str] | None = None,
         max_classes_in_prompt: int | None = None,
         class_mention_counts: dict[str, int] | None = None,
+        reenrich: bool = False,
     ) -> ObjectExtraction:
         if not schema.classes:
             return ObjectExtraction()
@@ -671,6 +707,7 @@ class OllamaBackend:
                 "{known_objects}",
                 render_known_objects(prior, candidates=candidate_object_names),
             )
+            .replace("{reenrich_directive}", _REENRICH_DIRECTIVE if reenrich else "")
             .replace("{text}", text)
         )
         raw = await self._generate(prompt)
@@ -748,7 +785,13 @@ class AnthropicBackend:
         except ImportError as exc:
             raise RuntimeError("anthropic package not available") from exc
         try:
-            response = await self._client.messages.create(
+            # Stream, not blocking create(): large verb-rich outputs (~8k
+            # tokens) take 1-3 min to generate, and a non-streaming request
+            # leaves the HTTP connection idle that whole time — intermediate
+            # infrastructure drops it, surfacing as APIConnectionError
+            # ("Request timed out or interrupted"). Streaming keeps bytes
+            # flowing so the connection survives long generations.
+            async with self._client.messages.stream(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 temperature=self.temperature,
@@ -760,7 +803,12 @@ class AnthropicBackend:
                     }
                 ],
                 messages=[{"role": "user", "content": user_prompt}],
-            )
+            ) as stream:
+                # Drain deltas to keep the connection active; the SDK
+                # assembles the final Message (content + usage) for us.
+                async for _ in stream.text_stream:
+                    pass
+                response = await stream.get_final_message()
         except anthropic.APIStatusError as exc:
             raise RuntimeError(
                 f"Anthropic API error {exc.status_code}: {exc.message}"
@@ -809,6 +857,7 @@ class AnthropicBackend:
         candidate_object_names: list[str] | None = None,
         max_classes_in_prompt: int | None = None,
         class_mention_counts: dict[str, int] | None = None,
+        reenrich: bool = False,
     ) -> ObjectExtraction:
         if not schema.classes:
             return ObjectExtraction()
@@ -826,6 +875,7 @@ class AnthropicBackend:
                 "{known_objects}",
                 render_known_objects(prior, candidates=candidate_object_names),
             )
+            .replace("{reenrich_directive}", _REENRICH_DIRECTIVE if reenrich else "")
             .replace("{text}", text)
         )
         raw = await self._invoke(prompt)

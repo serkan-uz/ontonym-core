@@ -17,6 +17,7 @@ See README.md for the full API.
 from __future__ import annotations
 
 from .core import extract, extract_classes, extract_objects
+from .coref import CorefResolver, get_coref_resolver
 from .llm import (
     AnthropicBackend,
     Backend,
@@ -51,6 +52,9 @@ __all__ = [
     "extract",
     "extract_classes",
     "extract_objects",
+    # Coreference pre-pass
+    "CorefResolver",
+    "get_coref_resolver",
     # Backends
     "Backend",
     "OllamaBackend",

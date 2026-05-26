@@ -59,6 +59,36 @@ named, externally-tracked concept like a Linear issue or a Jira ticket — and
 even then, model the ticket itself (name = ticket-id), never the imperative
 phrase.
 
+DOCUMENT SCOPE RULE — extract from substance, not from inventory.
+A class earns its place ONLY if the document substantively DISCUSSES it: says
+what it is, what it does, what's happening with it, what decision involves it,
+or what action is being taken on it.
+
+IS — emit a class when an entity is part of the document's subject:
+  - The subject of the lede, headline, or hero block.
+  - An entity carrying its own action, decision, commitment, or event.
+  - A discount, offer, campaign, sale, or promotion the document is announcing.
+  - The product / service / target the document is about.
+
+IS NOT — skip the class when the entity appears only as:
+  - One entry in a navigation menu or service grid ("My travel | Transfer |
+    Car rentals | Parking | Hotel" — a row of links is inventory, not subject).
+  - A cross-sell or brand-roster strip listing the sender's other products.
+  - An app store badge, download link, social-media handle, or unsubscribe link.
+  - A footer / legal / privacy / registration / address block.
+  - A hyperlinked label with no surrounding prose explaining it.
+The test: if every mention of this entity were deleted from the document,
+would the document still mean roughly the same thing? If yes — it was
+inventory, skip it.
+
+DO NOT OVER-SPECIALISE EMAIL / MESSAGE CLASSES. The base classes `email`,
+`message`, `newsletter` already exist. Don't invent `flight_promotion_email`,
+`job_alert_email`, `position_tracking_email`, `marketplace_email`,
+`abandoned_cart_email`, `accelerator_newsletter`, etc. — these are
+campaign-type labels, not new structural classes. The structural class is
+`email`; the campaign is a separate `campaign` (or `discount`, `sale`,
+`announcement`) class linked by `announces` / `concerns` relationships.
+
 DIFF-ONLY OUTPUT (CRITICAL — read carefully):
 Output ONLY entities that are NEW relative to KNOWN CLASSES + PREVIOUS CONTEXT below.
 - Do NOT re-emit a class that already appears in KNOWN CLASSES — skip it entirely.
@@ -116,6 +146,69 @@ Do NOT model actor-less happenings as actions — actions require an actor doing
 something to a target. "An outage occurred at 14:23" is an event class, not an
 action; "Sarah deployed PaymentService at 14:02" is an action.
 
+HIGH-RECALL ACTIONS RULE:
+For EVERY transitive verb you see in the text, emit an action class. Do not
+filter on "importance" — ordinary verbs (say, propose, explain, mention, note,
+disagree, suggest, recommend, ask, answer, discuss, agree) are the connective
+tissue of the graph and must be captured. The bar is mechanical: actor + target
+resolvable to classes → emit.
+  - `actor` = class of the subject.
+  - `target` = class of the direct or prepositional object.
+  - If either side can't be resolved to a class, OMIT the action entirely —
+    do NOT invent classes just to host an unattributable verb.
+  - Applies to ALL classes that have instances, not just `person`. Examples:
+    `(application, raise, alert)`, `(market, move, stock_price)`,
+    `(team, agree_on, design_direction)`, `(speaker, propose, design)`.
+
+SKIP these verb categories — they are not real actions:
+  - Auxiliaries: be, have, do, get, let (and all conjugations).
+  - Modals: can, could, will, would, shall, should, may, might, must, ought.
+  - Copular: is, are, was, were, seem, appear, become, remain.
+  - Pure existence: exist, occur, happen — use `event` classes per EVENTS RULE.
+
+LEMMATIZATION RULE (mechanical — apply on every action name):
+Every action `name` MUST be in English infinitive (base) form. Convert every
+inflected verb to its dictionary form before emitting. Do NOT preserve tense,
+person, number, or aspect in the action name.
+
+  - Past tense: presented → present, agreed → agree, thought → think,
+    said → say, discussed → discuss, gave → give, took → take, wrote → write,
+    chose → choose, decided → decide
+  - Third-person singular: presents → present, proposes → propose, runs → run
+  - Gerunds / present participles: presenting → present, discussing → discuss,
+    running → run, agreeing → agree
+  - Past participles: presented → present, taken → take, done → do,
+    chosen → choose
+  - Phrasal verbs: keep the particle, lemmatize the verb:
+    agreed on → agree_on, picked up → pick_up, signed off → sign_off
+  - Negations / modals are stripped: "would propose" → action `propose`
+    (the modal is metadata for the description, not part of the verb name)
+
+One action class per lemma. If the conversation contains "presented",
+"presents", and "presenting", all three map to a single action `present` —
+emit it ONCE in `actions[]`.
+
+Hard rule: if you find yourself about to emit an `_ed`, `_ing`, or `_s`
+action_name, stop and re-derive the infinitive.
+
+WORKED EXAMPLE (illustrative):
+INPUT SENTENCE: "Sarah presented the trend report; Marcus disagreed and
+proposed a different framing; the team agreed to revisit it next week."
+ASSUMING SCHEMA HAS: person, trend_report, framing, team.
+EXPECTED actions[]:
+  {"name": "present",    "actor": "person", "target": "trend_report",
+   "description": "Person presents a trend report to colleagues"},
+  {"name": "disagree",   "actor": "person", "target": "trend_report",
+   "description": "Person disagrees with another person's report"},
+  {"name": "propose",    "actor": "person", "target": "framing",
+   "description": "Person proposes an alternative framing"},
+  {"name": "agree_on",   "actor": "team",   "target": "framing",
+   "description": "Team agrees on revisiting a framing"}
+Note: no past-tense forms (presented/disagreed/proposed/agreed) leak into
+the action names. The modals/futures ("agreed to revisit") strip down to
+the base verbs (`agree_on`, plus a separate `revisit` action if both sides
+are resolvable).
+
 DECISIONS AND COMMITMENTS RULE (read carefully):
 A **decision** is a STATED OUTCOME that fixes future behaviour ("we'll honour the
 10% discount", "Postgres is the primary store", "moving the renewal to Q3"). The
@@ -130,12 +223,59 @@ on the thing the speaker promised to deliver / own, and the speaker is the actor
 the commitment.
 A commitment is NOT a decision: a decision fixes WHAT happens; a commitment fixes
 WHO owns making it happen.
-IS NOT a decision or commitment, do not emit:
+
+A **discussion** is a topic block in a meeting transcript where speakers
+exchange views, share findings, or report opinions about a specific subject
+WITHOUT (yet) reaching a firm decision. Use this class for meeting-style
+inputs when you see content like "the team talked about X", "A explained
+that Y, B disagreed because Z", or "the test showed promising results".
+Emit class `discussion` (inherits `event`) with `summary` (what was said)
+and `topic` (the subject) properties. Speakers become `reported_by`
+relationships; subjects become `affected` relationships. Discussions are
+the natural fallback for substantive meeting content that doesn't crystallise
+into a single fixed outcome.
+
+A **finding** is a reported observation or test result stated in the
+transcript ("recognition results were good", "the prototype scored 85%").
+Emit as class `finding` (inherits `event`) with `summary` and any numeric
+result as a typed property. If the finding leads to a fixed next step,
+also emit a `decision` and link them via a relationship.
+
+An **argument** is a POSITION or BELIEF a speaker states on a topic TOGETHER
+WITH the REASONING behind it. It does NOT require an opposing side — a single
+speaker explaining why they believe something is an argument. Fire it for:
+  - defensive/conditional positions ("it must stay hand-holdable because
+    voice recognition is only an addition");
+  - a witness/official stating a belief under questioning ("Blaney believed
+    governing bodies avoid imprudent risk because they see risks in forecasts
+    and borrowing requests");
+  - any "X said/believed/explained/argued/noted that Y, because Z" where the
+    reasoning Z is present.
+This is distinct from a plain action (a proposal is WHAT someone suggested)
+and from a bare finding (a result with no stance). Emit class `argument`
+(inherits `event`) with these properties:
+  - `claim` — the position asserted (one sentence).
+  - `reasoning` — the WHY behind it (the conditional/defensive logic).
+  - `stance` — optional: `for` | `against` | `alternative` relative to the topic.
+And these relationships:
+  - `reported_by` → the person who made the argument.
+  - `about` → the topic object the argument concerns (a feature, design
+    choice, policy, etc.).
+
+A **disagreement** is NOT its own class — it is a `disagrees_with`
+relationship BETWEEN TWO `argument` objects. WHENEVER two parties take
+opposing positions, you MUST emit BOTH arguments (each with its own
+`claim` + `reasoning` + `reported_by`) AND a `disagrees_with` relationship
+linking them. Capturing only one side is a recall failure — the question
+"why did X disagree with Y about Z?" needs BOTH positions and BOTH
+reasonings in the graph. Do not collapse a two-sided disagreement into a
+single proposal.
+
+IS NOT a decision, commitment, discussion, finding, or argument, do not emit:
   - tasks already done ("I sent the report") — past actions belong to `actions`, not events.
-  - opinions ("I think Postgres is faster") — no fixed outcome, no responsibility taken.
-  - hypotheticals ("we could move to Q3", "we might honour 10%") — nothing committed yet.
+  - hypotheticals with no follow-up ("we could move to Q3" without context) — nothing committed yet.
   - ticket titles in imperative form — those are work items, model the ticket itself.
-Decision and commitment names stay singular and lowercase like every other class —
+Decision, commitment, discussion, finding, argument names stay singular and lowercase like every other class —
 no instance values in the class name.
 
 LANGUAGE RULE: Produce ALL output strings in English regardless of the input language.
@@ -155,6 +295,24 @@ FORMAT RULES:
    reference classes in the classes list.
 6. Properties have no "value" field — at class level we record only that a property exists
    on the class, not its specific value on any instance.
+6b. QUANTITATIVE, TEMPORAL & IDENTIFIER PROPERTIES: when the text states a
+   number, duration, date, count, amount, OR an identifier about a class's
+   instances, DEFINE the matching property on that class so the object pass
+   can record the value. ANY number is likely load-bearing — capture it.
+   Examples:
+   - durations: "running for three and a half years" → `duration` (string);
+   - dates: "donated in 1908" → `year` (date);
+   - amounts: "$550 million spent" → `amount` (string, keep the unit);
+   - counts: "across 28 counties" → `county_count` (number);
+   - IDENTIFIERS (agenda items, dockets, resolutions, ordinances, cases,
+     tickets): "item number 16" → `item_number`; "Docket 1239" →
+     `docket_number`; "Resolution 31669" → `resolution_number`;
+     "Ordinance 2016 0392" → `ordinance_number` (string, preserve the exact
+     token). These identify the THING under discussion and are high-value
+     for retrieval — never drop a number as noise.
+   The object pass can ONLY emit property values whose name you define here —
+   so if any number/identifier appears in the text, the class MUST carry a
+   property to hold it, or the fact is lost.
 7. If a value is uncertain, omit the entry. Do not fabricate.
 8. Output ONLY the JSON object. No prose, no "Here is the result:", no triple backticks.
 
