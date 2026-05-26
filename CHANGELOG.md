@@ -2,6 +2,25 @@
 
 All notable changes to ontonym-core will be documented here.
 
+## 0.3.0 — 2026-05-26
+
+Re-enrichment + coreference. Backwards-compatible — the new `extract_objects`
+kwarg defaults to `False` (current behaviour) and coref is opt-in via env.
+
+- `extract_objects(..., reenrich=False)` on both backends. When `True`, the
+  object prompt's new `{reenrich_directive}` placeholder is filled with a block
+  that SUSPENDS the diff-only "skip known objects" rule, so re-running an
+  already-extracted document attaches new facts (properties, actions,
+  relationships, events) onto entities that already exist — the fix for the
+  diff-only-on-a-dense-graph enrichment ceiling.
+- New `ontonym_core.coref` module + `get_coref_resolver()` export: a pluggable
+  coreference pre-pass selected by `COREF_BACKEND` (`none` | `llm` | `spacy`)
+  that resolves pronouns/references to named entities before extraction. The
+  `llm` backend rewrites via `COREF_LLM_BACKEND` / `COREF_MODEL`; `spacy` uses
+  the optional `fastcoref` dependency.
+- `prompts/object.txt` carries the `{reenrich_directive}` placeholder (filled
+  only when `reenrich=True`; empty otherwise).
+
 ## 0.2.0 — 2026-05-18
 
 Optional prompt-shaping hints — backwards-compatible additions to the

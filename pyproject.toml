@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ontonym-core"
-version = "0.2.0"
+version = "0.3.0"
 description = "Turn free text into a typed object graph — classes, objects, properties, actions, relationships, rules, and events — with any LLM."
 readme = "README.md"
 requires-python = ">=3.11"
