@@ -13,19 +13,31 @@ specific build), NT-1247 (a specific ticket), "müşteri ödeme entegrasyonu" (a
 specific feature). The name refers to ONE real thing that someone could point
 at, search for, or own — and that will keep existing in the next document too.
 
-An object is NOT:
+An object is NOT (EXCEPT for `todo` — see the TODO EXCEPTION below):
   • a verb phrase or imperative ("add a metric", "tune the pool", "investigate X");
   • a description of work to be done, planned, intended, or recommended;
   • a bullet from an action-items / next-steps / todo / recommendations /
     follow-ups / suggestions list;
   • a symptom, observation, hypothesis, or one-off remark;
-  • an attribute or value of another object (a status, a version, a number).
+  • an attribute or value of another object (a status value, a version, a
+    number — these are `properties`; a status TRANSITION between two values is
+    a `status_change` event, see STATUS AND STATUS CHANGES below).
 
 NAME-SHAPE RULE: if a candidate object's name starts with an English verb
 (add, tune, fix, alert, investigate, review, improve, increase, decrease,
 monitor, write, raise, send, schedule, deploy, …) and refers to future work,
-it is a TASK, not an object — skip it. Object names are noun phrases that
-identify named, real things, not sentences.
+it is a TASK, not an object — skip it (EXCEPT `todo`, below). Object names are
+noun phrases that identify named, real things, not sentences.
+
+TODO EXCEPTION: the two rules above skip work-phrases ONLY when the schema has
+no `todo` class. If the schema DOES declare `todo`, then each genuine OPEN
+action item — an explicit to-do/checklist item, a "TODO:" marker, or a "we
+need to / I have to / don't forget to …" obligation that has NOT yet happened —
+IS a `todo` object. Name it from the imperative as a snake_case slug
+(`buy_gift`, `call_landlord`, `finish_slides`) with the phrase as display_name;
+set `status`="open" and, when stated, `due`. Link the responsible person with
+an `assigned_to` relationship (todo → person). Work that ALREADY happened is an
+action, not a todo; a vague wish or feeling is neither.
 
 RECALL POLICY: subject to the definition above, you are evaluated on RECALL
 across legitimate instances. If a thing IS an object by the rules above, emit
@@ -98,15 +110,19 @@ Bind each to the specific object it characterises (the program, the project,
 the deal). If the schema lacks a suitable property name, use the closest
 existing one or a sensibly-named new one — do not drop the fact.
 
-# FOLLOW-UP LISTS ARE PROPERTIES, NOT OBJECTS
+# FOLLOW-UP LISTS — `todo` OBJECTS IF THE SCHEMA HAS `todo`, ELSE A PROPERTY
 
 When the text contains a list of follow-up work attached to a parent thing —
 "Action items: …", "Next steps: …", "Recommendations: …", "TODO: …",
-"Follow-ups: …", "Suggestions: …", or any equivalent — emit the PARENT
-(post_mortem, meeting, decision, review, incident, …) as ONE object, and
-fold the list into a single TEXT property on it. Pick a property name that
-matches what the text calls the list (action_items, next_steps,
-recommendations, …). Join items with "; ". Do NOT emit one object per bullet.
+"Follow-ups: …", "Suggestions: …", or any equivalent:
+  - IF the schema declares a `todo` class: emit each OPEN item as its own
+    `todo` object (per the TODO EXCEPTION above), and relate it to the parent
+    (post_mortem, meeting, decision, review, incident, …) — e.g. a `concerns`
+    or `assigned_to` relationship. The parent is still ONE object.
+  - ELSE (no `todo` class in the schema): emit the PARENT as ONE object and
+    fold the list into a single TEXT property on it (action_items, next_steps,
+    recommendations, … — match what the text calls the list), items joined with
+    "; ". Do NOT emit one object per bullet in this case.
 
 
 # SCHEMA RULES
@@ -160,7 +176,9 @@ Required fields per emission:
     as the `action_name`. If you catch yourself writing `presented` or
     `agreeing` or `presents`, stop and convert to the infinitive.
   - `actor` = canonical name of the subject object.
-  - `target` = canonical name of the direct or prepositional object.
+  - `target` = canonical name of the DIRECT object (the thing acted on). For
+    transfer verbs (give/send/pay/offer/hand/…) this is the THING TRANSFERRED,
+    never the recipient — see DITRANSITIVE VERBS below.
   - `occurred_at` = sentence-level timestamp if inferable from the text,
     else null.
   - `description` = a SPECIFIC, FACT-BEARING paraphrase of the sentence,
@@ -187,6 +205,26 @@ per verb whose actor + target are both resolvable, in the order they appear:
 Skip verbs where actor or target cannot be resolved without inventing
 entities. Do NOT emit `(unknown, said, x)` or `(speaker_5, propose, mic)`
 placeholders.
+
+DITRANSITIVE / TRANSFER VERBS (give, send, hand, pass, offer, lend, pay, owe,
+award, gift, bring, mail, throw, sell, tell, show, teach, …) name three roles —
+actor (giver), theme (the thing transferred), recipient (who receives it). The
+binary `(actor, verb, target)` shape only holds two, so apply ONE deterministic
+convention so "X gave Y a Z" always extracts the same way:
+  - `target` = the THEME (the thing transferred), NEVER the recipient.
+      "Phoebe gave Lizzie a cigarette" → (phoebe, give, cigarette)
+      "Ross sent Rachel the photos"     → (ross, send, photo)
+      "Chandler paid Joey the rent"     → (chandler, pay, rent)
+  - capture the RECIPIENT as a SEPARATE relationship in `relationships[]`,
+    from the theme object to the recipient object, type `recipient`:
+      {source: cigarette, target: lizzie, type: recipient}
+      {source: photo, target: rachel, type: recipient}
+  - if no theme is stated ("Phoebe called Lizzie"), the verb is NOT a transfer
+    — emit the ordinary `(phoebe, call, lizzie)` action with the person as the
+    target and no recipient relationship.
+This is the fix for the inconsistency where "X gave Y a Z" sometimes recorded
+the gift as the target and sometimes the recipient. The gift is ALWAYS the
+target; the recipient is ALWAYS a `recipient` relationship.
 
 Skip auxiliaries, modals, copular, and pure-existence verbs (same list as
 the class prompt: be/have/do/get/let, can/could/will/would/shall/should/
@@ -398,8 +436,8 @@ A line IS NOT a decision or commitment if:
   - the speaker hedges ("we could", "we might", "I'd like to") — no
     fixed outcome, no responsibility taken. Skip.
   - it's a recommendation in a follow-ups / action-items list — those
-    fold into the parent property per the FOLLOW-UP LISTS rule above;
-    do not promote them to standalone decisions.
+    become `todo` objects (or fold into the parent property) per the
+    FOLLOW-UP LISTS rule above; do not promote them to decisions/commitments.
   - it's a status report ("Q3 numbers are in") — that's a measurement
     or an event of a different class, not a decision.
 
@@ -426,6 +464,55 @@ EXPECTED relationships[]:
    "type": "affected", "description": "Commitment is directed at Acme."}
   {"source": "report_to_acme_by_friday", "target": "alice",
    "type": "reported_by", "description": "Alice made the commitment."}
+
+
+# STATUS AND STATUS CHANGES
+
+Objects with a lifecycle carry a CURRENT state and move through TRANSITIONS.
+Capture both — they answer "where does X stand?" and "how did X get here?", and
+the transition stream is what flow detection later walks.
+
+CURRENT STATE → a `status` property on the object. Whenever the text states what
+state an instance is in ("the Acme deal is in negotiation", "PD-3286 is resolved",
+"the renewal is won"), emit a `properties[]` entry with name `status` and the
+current value (data_type string). Conflicting values across chunks are expected —
+emit each; downstream keeps the latest as the object's current status.
+
+TRANSITION → a `status_change` event. Whenever the text shows an instance moving
+from one state to another ("the deal moved from negotiation to won", "PD-3286 was
+closed", "the account was locked"), emit:
+  - one `events[]` entry, class_name `status_change`, a snake_case `name` built
+    from the object + new state (e.g. `acme_renewal_to_won`, `pd_3286_closed`).
+  - `properties[]`: `to_status` (the new state) always; `from_status` (the prior
+    state) when the text names it; `occurred_at` when a time is inferable.
+  - a `relationships[]` `affected` edge from the status_change to the object whose
+    status changed.
+  - a `relationships[]` `reported_by` edge to the person who made the change, when
+    one is named.
+A status_change USUALLY co-occurs with the action that caused it. Emit BOTH — the
+action records WHO did WHAT (action_name `close`, actor, target); the status_change
+records the resulting STATE MOVE that the object's history and any flow depend on.
+
+WORKED SHAPE (illustrative — match the actual schema):
+INPUT: "Marcus closed the Acme renewal — it's won now (was in negotiation)."
+events[]:
+  {"class_name":"status_change","name":"acme_renewal_to_won",
+   "display_name":"Acme renewal → won","description":"Acme renewal moved to won"}
+properties[]:
+  {"class_name":"status_change","object_name":"acme_renewal_to_won",
+   "name":"from_status","value":"negotiation","data_type":"string"}
+  {"class_name":"status_change","object_name":"acme_renewal_to_won",
+   "name":"to_status","value":"won","data_type":"string"}
+  {"class_name":"deal","object_name":"acme_renewal","name":"status",
+   "value":"won","data_type":"string"}
+actions[]:
+  {"action_name":"close","actor":"marcus","target":"acme_renewal",
+   "description":"Marcus closed the Acme renewal","occurred_at":null}
+relationships[]:
+  {"source":"acme_renewal_to_won","target":"acme_renewal","type":"affected",
+   "description":"The renewal whose status changed"}
+  {"source":"acme_renewal_to_won","target":"marcus","type":"reported_by",
+   "description":"Marcus made the change"}
 
 
 # LANGUAGE RULES

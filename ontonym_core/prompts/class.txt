@@ -48,16 +48,25 @@ synonym (e.g. don't introduce "tool" when "technology" already exists). Classes 
 in this session are listed under KNOWN CLASSES below; use them as the strong default and
 only invent a new class when none fits.
 
-DO NOT INVENT TASK-SHAPED CLASSES. Classes named `task`, `action_item`, `todo`,
-`next_step`, `recommendation`, `change_request`, `follow_up`, `suggestion` turn
-follow-up work into separate entities when it should live as a property on the
-parent class. Skip them. Instead, when the text shows a parent thing with a
-list of follow-up work, add a TEXT property to the parent class (`action_items`,
-`next_steps`, `recommendations`, …) and let the object extractor fold the list
-into one value. The only legitimate case for a work-tracking class is a stable,
-named, externally-tracked concept like a Linear issue or a Jira ticket — and
-even then, model the ticket itself (name = ticket-id), never the imperative
-phrase.
+TODO / ACTION-ITEM CLASS — allowed, but collapse to exactly ONE class named
+`todo`. When the text contains genuine things-someone-still-has-to-do — an
+explicit to-do list, a checklist, "TODO:" markers, or assigned action items
+with a clear deliverable — model them with a single class named `todo`. Each
+individual item becomes an OBJECT of that class downstream; do NOT mint a new
+class per item, and do NOT invent synonyms — `task`, `action_item`,
+`next_step`, `follow_up`, `change_request`, `recommendation`, `suggestion` all
+collapse into `todo`.
+  IS a todo: an OPEN, imperative action someone still has to carry out —
+    "buy a gift", "call the landlord", "finish the slides", a checkbox item,
+    a "we need to / I have to / don't forget to …" obligation.
+  IS NOT a todo: an action that ALREADY happened ("I sent the report" → that
+    is an action, not a todo); a vague wish, feeling, or hope; or a general
+    statement of fact. If it is already done, it is not a todo.
+Give `todo` a `status` property (string: open|done) and a `due` property
+(date). A `todo` carries its assignee as a relationship to the person
+responsible (`assigned_to`: todo → person). A stable, externally-tracked work
+item (a Linear issue, a Jira ticket) is still modelled as itself
+(name = ticket-id), never as a `todo`.
 
 DOCUMENT SCOPE RULE — extract from substance, not from inventory.
 A class earns its place ONLY if the document substantively DISCUSSES it: says
@@ -88,6 +97,19 @@ DO NOT OVER-SPECIALISE EMAIL / MESSAGE CLASSES. The base classes `email`,
 campaign-type labels, not new structural classes. The structural class is
 `email`; the campaign is a separate `campaign` (or `discount`, `sale`,
 `announcement`) class linked by `announces` / `concerns` relationships.
+
+DO NOT OVER-SPECIALISE COMPANY / STARTUP CLASSES. The base classes `company`,
+`startup`, `accelerator`, `accelerator_program`, `portfolio_company` already
+exist. A specific named business ("Stripe", "Airbnb", "345 Hub", "500 Global")
+is an INSTANCE, not a class — emit the base class and let the object extractor
+name the instance. Do NOT invent industry-niche classes like
+`fintech_lending_platform`, `ai_powered_accelerator`, `quantum_computing_company`,
+`smoothie_appliance_company`, `social_media_management_platform`, `payment_platform`
+— the sector is a PROPERTY (`industry`) of the company, not a class. A startup is
+a `startup` (IS-A `company`); a VC firm or an accelerator is a `company`; a
+startup that an accelerator backs is a `startup` / `portfolio_company`. Likewise
+do NOT turn a company's marketing sections — its "pillars", "commitments",
+"strategies", "networks" — into classes; that is page fluff, not structure.
 
 DIFF-ONLY OUTPUT (CRITICAL — read carefully):
 Output ONLY entities that are NEW relative to KNOWN CLASSES + PREVIOUS CONTEXT below.
@@ -136,9 +158,9 @@ Rule names are snake_case English imperatives or declaratives, NOT instance text
 Do NOT invent rules from speculation; only emit rules the text actually states.
 
 EVENTS RULE: for things that HAPPEN at a moment in time without a clear actor —
-incidents, outages, deployments, releases, decisions, commitments, alerts firing,
-market events, policy changes — emit a class that inherits from the built-in
-`event` class. Use `inherited_from: "event"` (or a more specific event subclass
+incidents, outages, deployments, releases, decisions, commitments, status changes,
+alerts firing, market events, policy changes — emit a class that inherits from the
+built-in `event` class. Use `inherited_from: "event"` (or a more specific event subclass
 like `incident` if one already exists). The `event` class owns
 `occurred_at` and `summary`; children add their own properties (e.g.
 `incident.severity`, `release.version`).
@@ -153,12 +175,27 @@ disagree, suggest, recommend, ask, answer, discuss, agree) are the connective
 tissue of the graph and must be captured. The bar is mechanical: actor + target
 resolvable to classes → emit.
   - `actor` = class of the subject.
-  - `target` = class of the direct or prepositional object.
+  - `target` = class of the DIRECT object (the thing acted on). For transfer
+    verbs (see below) this is the thing transferred, NOT the recipient.
   - If either side can't be resolved to a class, OMIT the action entirely —
     do NOT invent classes just to host an unattributable verb.
   - Applies to ALL classes that have instances, not just `person`. Examples:
     `(application, raise, alert)`, `(market, move, stock_price)`,
     `(team, agree_on, design_direction)`, `(speaker, propose, design)`.
+
+DITRANSITIVE / TRANSFER VERBS (give, send, hand, pass, offer, lend, pay, owe,
+award, gift, bring, mail, throw, sell, tell, show, teach, …): these carry THREE
+roles — an actor (giver), a theme (the thing transferred), and a recipient (who
+receives it). An action only holds actor + target, so split the roles the SAME
+way every time so identical sentences extract identically:
+  - the action's `target` = the class of the THEME (the thing transferred),
+    never the recipient: `(person, give, consumer_good)`, `(person, pay, money)`.
+  - declare a `recipient` relationship from the theme class to the recipient
+    class so the third role is captured: `{source: consumer_good, target:
+    person, type: recipient}`, `{source: money, target: person, type:
+    recipient}`.
+  - if no theme is stated ("she called him"), the verb is NOT a transfer —
+    emit the ordinary `(actor, verb, target=person)` action and no recipient.
 
 SKIP these verb categories — they are not real actions:
   - Auxiliaries: be, have, do, get, let (and all conjugations).
@@ -277,6 +314,31 @@ IS NOT a decision, commitment, discussion, finding, or argument, do not emit:
   - ticket titles in imperative form — those are work items, model the ticket itself.
 Decision, commitment, discussion, finding, argument names stay singular and lowercase like every other class —
 no instance values in the class name.
+
+STATUS AND STATUS-CHANGE RULE (read carefully):
+Many classes have a LIFECYCLE — their instances move through named states (a deal:
+lead → qualified → negotiation → won/lost; a ticket: todo → in_progress → done; a
+person on a team: active → departed; an application: planned → live → deprecated).
+Capture this in TWO places, and NEVER as new classes:
+  1. The STATE FIELD is a single `status` property (data_type string) declared
+     ONCE on the class whose instances carry the lifecycle. Do NOT turn the
+     individual states into classes — `lead`, `won`, `done`, `deprecated` are
+     VALUES of `status`, not classes, and must never appear in `classes[]`. If
+     the text explicitly states the legal states or a transition constraint ("a
+     deal cannot skip from lead straight to won"), that is a `rule` (see RULES
+     RULE), not a property and not a class.
+  2. A TRANSITION between two states is the built-in event subclass
+     `status_change` (inherits `event`). When the text shows an instance moving
+     from one state to another ("the deal moved to won", "PD-3286 was closed",
+     "the account was locked"), emit class `status_change` if it is not already
+     in KNOWN CLASSES — REUSE this exact name; do NOT invent `state_transition`,
+     `status_update`, `transition`, or a per-domain variant. It owns `from_status`
+     and `to_status` (plus inherited `occurred_at`); the changing instance links
+     via `affected`, the person who made the change (if any) via `reported_by`.
+A status_change is NOT an action and NOT a plain property: the property is the
+CURRENT state (static), an action is the actor's VERB, the status_change is the
+resulting STATE TRANSITION. They usually CO-OCCUR — "Marcus closed the deal"
+yields BOTH an action class (`close`) AND the `status_change` class. Emit both.
 
 LANGUAGE RULE: Produce ALL output strings in English regardless of the input language.
 The input may be Turkish, German, etc., but every name, description, property name, action
