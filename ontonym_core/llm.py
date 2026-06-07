@@ -262,30 +262,106 @@ def render_class_schema(
     return "\n".join(lines).rstrip()
 
 
+def _focus_classes(schema: ClassExtraction) -> set[str]:
+    """The classes worth showing existing objects for: every class in the
+    current document plus its ancestors AND descendants. The same real entity
+    is frequently typed as a class OR its parent (`apartment` vs `location`),
+    so to dedup reliably the extractor must see known objects across the whole
+    inheritance chain, not just the exact class it lands on this time."""
+    parent = {c.name: c.inherited_from for c in schema.classes}
+    children: dict[str, list[str]] = {}
+    for c in schema.classes:
+        if c.inherited_from:
+            children.setdefault(c.inherited_from, []).append(c.name)
+    focus: set[str] = set()
+    for name in (c.name for c in schema.classes):
+        focus.add(name)
+        anc = parent.get(name)
+        guard: set[str] = set()
+        while anc and anc not in guard:
+            guard.add(anc); focus.add(anc); anc = parent.get(anc)
+        stack = list(children.get(name, []))
+        while stack:
+            d = stack.pop()
+            if d in focus:
+                continue
+            focus.add(d); stack.extend(children.get(d, []))
+    return focus
+
+
 def render_known_objects(
     prior: ObjectExtraction,
     *,
-    max_items: int = 60,
+    schema: ClassExtraction | None = None,
+    per_class_cap: int = 50,
+    total_cap: int = 250,
     candidates: list[str] | None = None,
 ) -> str:
-    """Render the known-objects hint for the object-pass prompt.
+    """Render the known-objects hint for the object-pass prompt, GROUPED BY
+    CLASS so the extractor can see, for every class it is about to populate,
+    which instances already exist — and reuse their canonical names instead of
+    coining a near-duplicate ("Monica's apartment" vs "Monica and Rachel's
+    apartment", typed once as `apartment` and once as `location`).
+
+    When `schema` is given, the classes in the current document (plus their
+    ancestors and descendants — see `_focus_classes`) are shown FIRST and are
+    never starved by the global cap; the remaining classes fill up to
+    `total_cap` names. This replaces the old flat, oldest-first `[:60]` slice,
+    which hid later instances of a class behind earlier-ingested ones and so
+    silently defeated dedup. Without `schema` it degrades to a grouped, capped
+    list with no prioritisation.
 
     When `candidates` is non-empty, they're surfaced under a STRONG CANDIDATES
-    preamble — same shape as the class-pass candidate hint, but at the
-    instance level. Caller pre-computes these (semantic search, frequency,
-    hand-picked) and supplies the canonical names.
+    preamble — caller pre-computes these (semantic search, frequency).
     """
     all_items = list(prior.objects) + list(prior.events)
     if not all_items:
         base = "(none yet)"
     else:
-        rendered = [f"{o.class_name}:{o.name}" for o in all_items[:max_items]]
-        more = (
-            f" ... and {len(all_items) - max_items} more"
-            if len(all_items) > max_items
-            else ""
+        by_class: dict[str, list[str]] = {}
+        for o in all_items:
+            by_class.setdefault(o.class_name or "?", []).append(o.name)
+
+        focus = _focus_classes(schema) if schema is not None else set()
+        focus_classes = sorted(c for c in by_class if c in focus)
+        other_classes = sorted(c for c in by_class if c not in focus)
+
+        lines: list[str] = []
+        dropped = 0
+
+        def emit(cls: str, cap: int) -> int:
+            names = by_class[cls]
+            shown = names[:cap]
+            extra = f" (+{len(names) - cap} more)" if len(names) > cap else ""
+            lines.append(f"  {cls}: " + ", ".join(shown) + extra)
+            return len(shown)
+
+        # Focus classes: always emitted, generous per-class cap (never starved).
+        for cls in focus_classes:
+            emit(cls, per_class_cap)
+            if len(by_class[cls]) > per_class_cap:
+                dropped += len(by_class[cls]) - per_class_cap
+
+        # Other classes: fill remaining budget so huge graphs don't blow the prompt.
+        used = sum(min(len(by_class[c]), per_class_cap) for c in focus_classes)
+        for cls in other_classes:
+            names = by_class[cls]
+            if used >= total_cap:
+                dropped += len(names)
+                continue
+            cap = min(per_class_cap, total_cap - used)
+            used += emit(cls, cap)
+            if len(names) > cap:
+                dropped += len(names) - cap
+        if dropped:
+            lines.append(f"  ... and {dropped} more not shown")
+
+        base = (
+            "KNOWN OBJECTS (grouped by class — for any mention of the SAME real "
+            "thing, REUSE the exact canonical name below; do NOT coin a "
+            "near-duplicate or re-type it under a parent/child class):\n"
+            + "\n".join(lines)
         )
-        base = "Objects: " + ", ".join(rendered) + more
     if not candidates:
         return base
     seen: set[str] = set()
@@ -705,7 +781,9 @@ class OllamaBackend:
             )
             .replace(
                 "{known_objects}",
-                render_known_objects(prior, candidates=candidate_object_names),
+                render_known_objects(
+                    prior, schema=schema, candidates=candidate_object_names,
+                ),
             )
             .replace("{reenrich_directive}", _REENRICH_DIRECTIVE if reenrich else "")
             .replace("{text}", text)
@@ -873,7 +951,9 @@ class AnthropicBackend:
             )
             .replace(
                 "{known_objects}",
-                render_known_objects(prior, candidates=candidate_object_names),
+                render_known_objects(
+                    prior, schema=schema, candidates=candidate_object_names,
+                ),
             )
             .replace("{reenrich_directive}", _REENRICH_DIRECTIVE if reenrich else "")
             .replace("{text}", text)

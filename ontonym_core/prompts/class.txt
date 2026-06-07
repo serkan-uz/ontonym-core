@@ -190,9 +190,10 @@ receives it). An action only holds actor + target, so split the roles the SAME
 way every time so identical sentences extract identically:
   - the action's `target` = the class of the THEME (the thing transferred),
     never the recipient: `(person, give, consumer_good)`, `(person, pay, money)`.
-  - declare a `recipient` relationship from the theme class to the recipient
-    class so the third role is captured: `{source: consumer_good, target:
-    person, type: recipient}`, `{source: money, target: person, type:
+  - declare a relationship from the theme class to the recipient class so the
+    third role is captured. Its type MUST be EXACTLY `recipient` — do not coin a
+    synonym (`given_to`, `sent_to`, `paid_to`, `sends`): `{source: consumer_good,
+    target: person, type: recipient}`, `{source: money, target: person, type:
     recipient}`.
   - if no theme is stated ("she called him"), the verb is NOT a transfer —
     emit the ordinary `(actor, verb, target=person)` action and no recipient.

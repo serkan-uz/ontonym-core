@@ -216,7 +216,10 @@ convention so "X gave Y a Z" always extracts the same way:
       "Ross sent Rachel the photos"     → (ross, send, photo)
       "Chandler paid Joey the rent"     → (chandler, pay, rent)
   - capture the RECIPIENT as a SEPARATE relationship in `relationships[]`,
-    from the theme object to the recipient object, type `recipient`:
+    from the theme object to the recipient object. The relationship type MUST be
+    EXACTLY `recipient` — never coin a synonym (`given_to`, `sent_to`,
+    `paid_to`, `gift_to`, `goes_to`); reuse the `recipient` type the class pass
+    declares so every transfer lands under one type:
       {source: cigarette, target: lizzie, type: recipient}
       {source: photo, target: rachel, type: recipient}
   - if no theme is stated ("Phoebe called Lizzie"), the verb is NOT a transfer
@@ -224,7 +227,7 @@ convention so "X gave Y a Z" always extracts the same way:
     target and no recipient relationship.
 This is the fix for the inconsistency where "X gave Y a Z" sometimes recorded
 the gift as the target and sometimes the recipient. The gift is ALWAYS the
-target; the recipient is ALWAYS a `recipient` relationship.
+target; the recipient is ALWAYS a `recipient` relationship (that exact type).
 
 Skip auxiliaries, modals, copular, and pure-existence verbs (same list as
 the class prompt: be/have/do/get/let, can/could/will/would/shall/should/
@@ -249,7 +252,20 @@ Object "name" is a canonical snake_case identifier. Derivation patterns:
 If the text uses multiple spellings for the same real-world thing, pick ONE canonical name
 and use it everywhere downstream (properties, actions, relationships).
 
-If KNOWN OBJECTS already lists this thing, REUSE its canonical name — do not duplicate.
+MATCH KNOWN OBJECTS BY REFERENT, NOT BY STRING. Before emitting an object, check whether
+the SAME real-world thing already appears in KNOWN OBJECTS (grouped by class above) —
+even when the text names it differently. Different surface forms that point to one thing
+("Monica's apartment", "Monica and Rachel's place", "their apartment") are ONE object: if
+any form is already known, REUSE that exact canonical name and do NOT emit a new object.
+This holds across ANY class, not just the inheritance chain: a real thing is ONE object
+under ONE class. If it already exists in KNOWN OBJECTS under any class — parent, child, or
+unrelated — REUSE that object; represent a different ROLE or aspect as a relationship or
+property, NOT a second object. E.g. if `central_perk` already exists as a `coffee_shop`, do
+NOT also create it as a `workplace`; emit `(rachel) works_at (central_perk)` instead. A
+person who is also a public figure is ONE `person` object, not a `person` plus a
+`public_figure`. (Caveat: genuinely DISTINCT referents that share a name stay separate — a
+company vs your customer-record for that company are two different things.) When unsure
+whether a mention is an existing object or a new one, prefer reusing the existing one.
 
 # DIFF-ONLY OUTPUT (CRITICAL — read carefully)
 
