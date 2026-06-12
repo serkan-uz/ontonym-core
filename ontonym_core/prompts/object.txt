@@ -48,7 +48,7 @@ NAMES ARE NEVER DROPPED: every proper personal name in the text MUST become a
 `person` object — full name, first name alone, or title+surname ("Marie
 Lowenthal", "Councilmember Dombroski", "Dr Blaney"). Emit the person EVEN IF
 their role or action is unclear, they are mentioned once, or the surrounding
-text is garbled by transcription errors (spoken-transcript noise like
+text is noisy or garbled (fragmented text like
 "a second device. Marie Lowenthal" still means Marie Lowenthal is a person —
 extract her). A missing name is a recall failure; when in doubt about a
 proper name, emit the person.
@@ -77,15 +77,15 @@ The test: if every mention of this entity were deleted from the document,
 would the document still mean roughly the same thing? If yes — it was
 inventory, skip it.
 
-For promotional emails specifically: the SUBJECT is typically a campaign or
-offer announcement plus the product the offer applies to. Emit:
-  - the campaign / sale / promotion as ONE object (e.g. "wizz_22_birthday_sale"),
-  - the product or service the offer is for (e.g. "flight"),
-  - the discount mechanism if explicit (e.g. "wizz_22_birthday_discount"),
-  - the sending brand as ONE object (e.g. "wizz_air").
-Do NOT emit the sender's other unrelated services listed in the navigation
-menu, the loyalty programs in a cross-sell strip, the mobile app, the social
-handles, or the legal entity address block.
+When the text ANNOUNCES something — an offer, campaign, sale, launch, or
+change — the subject is the announcement plus the thing it applies to. Emit:
+  - the announced campaign / sale / launch / change as ONE object,
+  - the product, service, or thing it applies to,
+  - the explicit mechanism when stated (a discount, a code, a policy),
+  - the announcing party as ONE object.
+Do NOT emit the announcer's other unrelated offerings that merely surround
+the announcement (navigation rows, cross-sell strips, app badges, social
+handles, legal blocks) — that is inventory per the rule above.
 
 
 # QUANTITATIVE & TEMPORAL FACTS ARE PROPERTIES
@@ -288,13 +288,14 @@ a chat line, a new ticket id, a new branch name — any single new instance — 
 enough to require non-empty output. Brevity of the input is NEVER a reason to
 emit empty arrays. If even ONE entity is unfamiliar to KNOWN OBJECTS, emit it.
 
-# MEETING TRANSCRIPTS
+# DELIBERATION PATTERNS — decisions, commitments, discussions, arguments
 
-Meeting transcripts are the highest-yield source of decisions, commitments,
-findings, and discussion outcomes. They look like multi-speaker dialogue
-with speaker labels ("Professor B:", "PhD A:", "Marketing:", "Industrial
-Design:") or numbered turns. The text density of important content is much
-higher than email or chat — extract aggressively.
+Any text can RECORD PEOPLE DELIBERATING: attributed speech turns, quoted
+positions, exchanges of views, reported conclusions. You do not know what
+kind of document you are given — judge by the SHAPE of the text in front of
+you. Wherever it has this deliberation shape, the density of decisions,
+commitments, findings, and discussion outcomes is high — extract aggressively
+using the patterns below.
 
 RECOGNIZE THESE PATTERNS AS DECISIONS (emit `events[]` with class_name='decision'):
   - First-person plural: "we'll go with X", "we agreed on X", "we decided to X",
@@ -302,48 +303,48 @@ RECOGNIZE THESE PATTERNS AS DECISIONS (emit `events[]` with class_name='decision
   - Passive voice: "it was decided that X", "it was agreed that X",
     "the conclusion is X", "the result is X"
   - Third-person plural: "they chose X", "they preferred X over Y"
-  - Reported findings: "the recognition results were good", "performance
-    was promising", "the test showed X" — these are FINDINGS, model them as
+  - Reported findings: "the test results were good", "performance
+    was promising", "the trial showed X" — these are FINDINGS, model them as
     decisions whose `summary` describes the conclusion and whose
     `description` carries the supporting context
   - Proposed-and-accepted: "X proposed Y; we'll go with it" — one decision,
     actor attribution via `reported_by` to the proposer
-A decision in a meeting does NOT require a single speaker with authority —
+A decision does NOT require a single speaker with authority —
 group consensus, working-group conclusions, and reported findings all count.
 
 RECOGNIZE THESE PATTERNS AS COMMITMENTS (emit `events[]` with class_name='commitment'):
   - "I'll X by <date>", "I will own X", "leave it with me"
   - "X will do Y", "Sarah will handle the renewal"
-  - Assignments stated in the meeting: "<name> is going to <verb> <thing>"
+  - Assignments stated in the exchange: "<name> is going to <verb> <thing>"
   - Promised follow-ups: "we'll circle back next week with X"
 
 RECOGNIZE THESE AS DISCUSSIONS (emit `events[]` with class_name='discussion'
 when the schema includes it, otherwise fold into `decision` with a
 descriptive summary):
-  - A topic block where multiple speakers exchange views without reaching
+  - A topic block where multiple parties exchange views without reaching
     a firm decision ("we talked about X — A thinks Y, B thinks Z").
   - Q&A pairs that record what someone thinks/believes/recommends about
-    a specific topic ("What did the professor think about X? — He said Y").
-  - Use the topic as the basis for the `name` (e.g. `voice_recognition_vs_handheld`,
-    `microphone_data_findings`). Put participating speakers as
+    a specific topic ("What did she think about X? — She said Y").
+  - Use the topic as the basis for the `name` (e.g. `caching_strategy_tradeoffs`,
+    `q3_pricing_options`). Put participating speakers as
     `reported_by` relationships and the subject objects as `affected`.
 
 RECOGNIZE THESE AS ARGUMENTS + DISAGREEMENTS (emit `events[]` with
 class_name='argument'). An argument is a STANCE + its REASONING — NOT just
-a proposal. The proposal ("Nathan proposed titanium") is an action; the
-argument ("Nathan argued the remote must stay hand-holdable BECAUSE voice
-recognition is only an addition") is a separate event that carries the WHY.
-For each argument emit:
+a proposal. The proposal ("Marcus proposed Redis") is an action; the
+argument ("Marcus argued the cache must stay in-process BECAUSE a network
+hop's failure mode is worse than stale reads") is a separate event that
+carries the WHY. For each argument emit:
   - one `events[]` entry, class_name='argument', snake_case `name` from the
-    position (e.g. `keep_hand_held_for_voice_limits`).
+    position (e.g. `keep_cache_in_process_for_failure_mode`).
   - `properties`: `claim` (the position, one sentence) and `reasoning`
     (the conditional/defensive logic — the WHY). Optionally `stance`
     (for/against/alternative).
   - `relationships`: `reported_by` → the speaker; `about` → the topic object.
 
 A SINGLE speaker stating a belief/position with reasoning is ALSO an argument
-— no opposing side required. In a scrutiny / Q&A / interview meeting (a
-committee questioning officials, an interviewer probing a witness), each
+— no opposing side required. In question-answer exchanges (one party probing,
+another answering — an interviewer, an examiner, a reviewer), each
 substantive "X believes/explains/argues that Y because Z" answer is an
 `argument`: emit it with `claim`=Y, `reasoning`=Z, `reported_by`=X, `about`=topic.
 Do NOT downgrade these to a bare `finding` (a finding has no stance/speaker
@@ -358,31 +359,31 @@ WHEN TWO PARTIES DISAGREE you MUST emit BOTH sides as separate `argument`
 events (each with its own claim + reasoning + reported_by) PLUS a
 `disagrees_with` relationship linking the two argument names. Capturing only
 the winning side, or only the proposal without the opposing reasoning, is a
-recall failure. Worked shape:
+recall failure. Worked shape (illustrative — match the actual schema):
   events[]:
-    {"class_name":"argument","name":"keep_hand_held_for_voice_limits",
-     "display_name":"ID: keep hand-held","description":"..."}
-    {"class_name":"argument","name":"drop_hand_held_for_voice_recognition",
-     "display_name":"UI: drop hand-held","description":"..."}
+    {"class_name":"argument","name":"keep_cache_in_process_for_failure_mode",
+     "display_name":"Marcus: keep cache in-process","description":"..."}
+    {"class_name":"argument","name":"move_cache_to_redis_for_shared_state",
+     "display_name":"Sarah: move cache to Redis","description":"..."}
   properties[]:
-    {"class_name":"argument","object_name":"keep_hand_held_for_voice_limits",
-     "name":"claim","value":"the remote must remain hand-holdable","data_type":"string"}
-    {"class_name":"argument","object_name":"keep_hand_held_for_voice_limits",
-     "name":"reasoning","value":"voice recognition is only an addition; not "
-     "everyone always uses it, so most of the time it is taken by hand","data_type":"string"}
-    {... same two properties for drop_hand_held_for_voice_recognition ...}
+    {"class_name":"argument","object_name":"keep_cache_in_process_for_failure_mode",
+     "name":"claim","value":"the cache must stay in-process","data_type":"string"}
+    {"class_name":"argument","object_name":"keep_cache_in_process_for_failure_mode",
+     "name":"reasoning","value":"a network hop adds a failure mode that is "
+     "worse than serving stale reads","data_type":"string"}
+    {... same two properties for move_cache_to_redis_for_shared_state ...}
   relationships[]:
-    {"source":"keep_hand_held_for_voice_limits","target":"industrial_designer",
+    {"source":"keep_cache_in_process_for_failure_mode","target":"marcus",
      "type":"reported_by","description":"..."}
-    {"source":"drop_hand_held_for_voice_recognition","target":"user_interface_designer",
+    {"source":"move_cache_to_redis_for_shared_state","target":"sarah",
      "type":"reported_by","description":"..."}
-    {"source":"keep_hand_held_for_voice_limits","target":"drop_hand_held_for_voice_recognition",
-     "type":"disagrees_with","description":"opposing positions on whether the "
-     "remote needs a hand-held form"}
+    {"source":"keep_cache_in_process_for_failure_mode","target":"move_cache_to_redis_for_shared_state",
+     "type":"disagrees_with","description":"opposing positions on where the "
+     "cache should live"}
 
-QMSum-STYLE QUERIES the graph must answer. When you see a meeting passage,
-think about how each of these would be answered later — extract aggressively
-so the answers exist as concrete events:
+QUERIES THE GRAPH MUST ANSWER. When you see deliberation, think about how
+each of these would be answered later — extract aggressively so the answers
+exist as concrete events:
   - "Why did X disagree with Y about Z?" → emit BOTH `argument` events with
     their `reasoning` + a `disagrees_with` edge (see above). This is the
     primary case — do not settle for one-sided capture.
@@ -391,24 +392,26 @@ so the answers exist as concrete events:
   - "Summarize what was said about X" → emit one event per substantive
     discussion/argument of X; the chat agent will aggregate them.
 
-RECALL BIAS for meetings: in a meeting transcript, err HARD toward emitting
-events. A meeting with 0 events extracted is almost always a recall failure —
-even short meetings produce 3-5 substantive decisions/discussions/commitments.
+RECALL BIAS for deliberation: when the text records an exchange of views,
+err HARD toward emitting events. A substantive exchange with 0 events
+extracted is almost always a recall failure — even a short one produces
+3-5 substantive decisions/discussions/commitments.
 
-# CHAT THREAD INPUTS
+# SPEAKER-ATTRIBUTED LINES
 
-When the input is a chat thread (Slack / Teams / similar), each line is
-formatted as `<speaker> at <ts>: <message text>`. The speaker is the
-actor for any commitment, decision, or action attributable to that line.
+When lines of the input carry an author prefix — `<speaker> at <ts>: <text>`,
+"Name: …" turns, quoted attributions, log lines with a user field — the
+prefix names the actor for any commitment, decision, or action attributable
+to that line.
 
-  - The speaker handle ("alice@example.com", "alice", or a platform id like "U1234")
+  - The handle ("alice@example.com", "alice", or a platform id like "U1234")
     is the canonical name source for the person — derive `name` per the
-    NAME RULES above. Do NOT invent a new person class for each new chat
+    NAME RULES above. Do NOT invent a new person class for each new
     speaker; `person` is the universal one.
-  - Multi-message threads are ONE ingestion: a question on line 1 and the
+  - A multi-line exchange is ONE ingestion: a question on line 1 and the
     answer/commitment on line 5 belong to the same decision/conversation.
     Attribute the commitment to the speaker of the line that made it, not
-    to whoever started the thread.
+    to whoever started the exchange.
 
 # DECISIONS AND COMMITMENTS
 
@@ -624,7 +627,7 @@ EXPECTED OUTPUT (illustrative — your output must match the actual schema given
   ]
 }
 
-# SECOND WORKED EXAMPLE — chat / log lines
+# SECOND WORKED EXAMPLE — a speaker-attributed line
 
 INPUT TEXT:
 "[09:02] Jin: On it, picking up PD-3286"

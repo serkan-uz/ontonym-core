@@ -7,6 +7,8 @@ CRITICAL: This extractor produces only CLASSES, not the specific instances menti
 - If the text mentions "prod-db-01", you do NOT emit "prod_db_01". You emit the class "database".
 - If the text mentions "EXPLAIN ANALYZE", you do NOT emit "explain_analyze". You emit the class it belongs to (e.g. "query_tool").
 - Specific identifiers, hostnames, person names, ticket numbers, IPs, and other instance-level identifiers MUST NOT appear anywhere in the output — not in class names, not in properties, not in actions, not in relationships, not in descriptions.
+- A specific named product, model, version, build, or SKU is an INSTANCE, not a kind: it is one object of a more general class, never its own class and never a subclass of one. A class name MUST NOT embed a model number, a version string, a release name, or a single product's proper name.
+- GENERAL TEST for class-vs-instance: a class is a KIND that many distinct real-world things could belong to. If only ONE real-world thing could ever be named by a candidate class, it is an object — emit the broadest general kind that still carries meaning and let the specific thing become an object of it downstream.
 
 Your job: read the text as evidence of WHAT KINDS OF THINGS exist in this domain,
 what properties those kinds have, what actions they perform on each other, how
@@ -90,26 +92,27 @@ The test: if every mention of this entity were deleted from the document,
 would the document still mean roughly the same thing? If yes — it was
 inventory, skip it.
 
-DO NOT OVER-SPECIALISE EMAIL / MESSAGE CLASSES. The base classes `email`,
-`message`, `newsletter` already exist. Don't invent `flight_promotion_email`,
-`job_alert_email`, `position_tracking_email`, `marketplace_email`,
-`abandoned_cart_email`, `accelerator_newsletter`, etc. — these are
-campaign-type labels, not new structural classes. The structural class is
-`email`; the campaign is a separate `campaign` (or `discount`, `sale`,
-`announcement`) class linked by `announces` / `concerns` relationships.
-
-DO NOT OVER-SPECIALISE COMPANY / STARTUP CLASSES. The base classes `company`,
-`startup`, `accelerator`, `accelerator_program`, `portfolio_company` already
-exist. A specific named business ("Stripe", "Airbnb", "345 Hub", "500 Global")
-is an INSTANCE, not a class — emit the base class and let the object extractor
-name the instance. Do NOT invent industry-niche classes like
-`fintech_lending_platform`, `ai_powered_accelerator`, `quantum_computing_company`,
-`smoothie_appliance_company`, `social_media_management_platform`, `payment_platform`
-— the sector is a PROPERTY (`industry`) of the company, not a class. A startup is
-a `startup` (IS-A `company`); a VC firm or an accelerator is a `company`; a
-startup that an accelerator backs is a `startup` / `portfolio_company`. Likewise
-do NOT turn a company's marketing sections — its "pillars", "commitments",
-"strategies", "networks" — into classes; that is page fluff, not structure.
+DO NOT OVER-SPECIALISE BY TOPIC. A class earns a specialisation ONLY when it
+is STRUCTURALLY different — its own properties, relationships, or lifecycle —
+never because its instances differ by topic, sector, campaign, or audience.
+The topical qualifier is a PROPERTY of the base class (or a separate linked
+object), not a new class:
+  - A communication about flights, jobs, or carts is still the base class
+    (`email`, `message`, `newsletter`) — do NOT mint topic variants like
+    `flight_promotion_email` or `abandoned_cart_email`. The campaign itself
+    is a separate `campaign` (or `discount`, `sale`, `announcement`) class
+    linked by `announces` / `concerns` relationships.
+  - An organisation in a niche is still the base class (`company`,
+    `startup`) — the niche is an `industry` property, never a class like
+    `fintech_lending_platform` or `quantum_computing_company`. A specific
+    named business ("Stripe") is an INSTANCE, not a class — emit the base
+    class and let the object extractor name the instance.
+  - A document's self-describing section labels — its "pillars",
+    "commitments", "strategies", "networks" — are page fluff, not structure;
+    never classes.
+The test: would the specialised class declare at least one property or
+relationship the base class lacks? If not, it is a topic label — use the
+base class.
 
 DIFF-ONLY OUTPUT (CRITICAL — read carefully):
 Output ONLY entities that are NEW relative to KNOWN CLASSES + PREVIOUS CONTEXT below.
@@ -181,7 +184,7 @@ resolvable to classes → emit.
     do NOT invent classes just to host an unattributable verb.
   - Applies to ALL classes that have instances, not just `person`. Examples:
     `(application, raise, alert)`, `(market, move, stock_price)`,
-    `(team, agree_on, design_direction)`, `(speaker, propose, design)`.
+    `(team, agree_on, design_direction)`, `(person, propose, design)`.
 
 DITRANSITIVE / TRANSFER VERBS (give, send, hand, pass, offer, lend, pay, owe,
 award, gift, bring, mail, throw, sell, tell, show, teach, …): these carry THREE
@@ -262,19 +265,20 @@ the commitment.
 A commitment is NOT a decision: a decision fixes WHAT happens; a commitment fixes
 WHO owns making it happen.
 
-A **discussion** is a topic block in a meeting transcript where speakers
-exchange views, share findings, or report opinions about a specific subject
-WITHOUT (yet) reaching a firm decision. Use this class for meeting-style
-inputs when you see content like "the team talked about X", "A explained
-that Y, B disagreed because Z", or "the test showed promising results".
+A **discussion** is a topic block where multiple parties exchange views,
+share findings, or report opinions about a specific subject WITHOUT (yet)
+reaching a firm decision — wherever the text records such an exchange,
+whatever kind of document it is. Fire it on content like "the team talked
+about X", "A explained that Y, B disagreed because Z", or "the test showed
+promising results".
 Emit class `discussion` (inherits `event`) with `summary` (what was said)
 and `topic` (the subject) properties. Speakers become `reported_by`
 relationships; subjects become `affected` relationships. Discussions are
-the natural fallback for substantive meeting content that doesn't crystallise
-into a single fixed outcome.
+the natural fallback for substantive exchange content that doesn't
+crystallise into a single fixed outcome.
 
 A **finding** is a reported observation or test result stated in the
-transcript ("recognition results were good", "the prototype scored 85%").
+text ("the test results were good", "the prototype scored 85%").
 Emit as class `finding` (inherits `event`) with `summary` and any numeric
 result as a typed property. If the finding leads to a fixed next step,
 also emit a `decision` and link them via a relationship.
@@ -282,11 +286,11 @@ also emit a `decision` and link them via a relationship.
 An **argument** is a POSITION or BELIEF a speaker states on a topic TOGETHER
 WITH the REASONING behind it. It does NOT require an opposing side — a single
 speaker explaining why they believe something is an argument. Fire it for:
-  - defensive/conditional positions ("it must stay hand-holdable because
-    voice recognition is only an addition");
-  - a witness/official stating a belief under questioning ("Blaney believed
-    governing bodies avoid imprudent risk because they see risks in forecasts
-    and borrowing requests");
+  - defensive/conditional positions ("the cache must stay in-process because
+    a network hop's failure mode is worse than stale reads");
+  - a person stating a belief under questioning ("the director believed the
+    budget assumptions were prudent because the forecasts already discounted
+    one-off income");
   - any "X said/believed/explained/argued/noted that Y, because Z" where the
     reasoning Z is present.
 This is distinct from a plain action (a proposal is WHAT someone suggested)

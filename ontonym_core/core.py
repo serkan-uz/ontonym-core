@@ -16,10 +16,10 @@ from __future__ import annotations
 import os
 from typing import Literal
 
-from .llm import AnthropicBackend, Backend, OllamaBackend
+from .llm import AnthropicBackend, Backend, DeepSeekBackend, OllamaBackend
 from .schema import ClassExtraction, Extraction, ObjectExtraction
 
-BackendName = Literal["ollama", "anthropic"]
+BackendName = Literal["ollama", "anthropic", "deepseek"]
 BackendLike = Backend | BackendName
 
 
@@ -34,9 +34,14 @@ def _resolve_backend(backend: BackendLike) -> Backend:
             return AnthropicBackend(
                 model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6"),
             )
+        if backend == "deepseek":
+            return DeepSeekBackend(
+                model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
+                base_url=os.getenv("DEEPSEEK_URL", "https://api.deepseek.com"),
+            )
         raise ValueError(
             f"Unknown backend name {backend!r}. Use 'ollama', 'anthropic', "
-            "or pass a Backend instance."
+            "'deepseek', or pass a Backend instance."
         )
     return backend
 

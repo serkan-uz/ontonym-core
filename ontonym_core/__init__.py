@@ -21,6 +21,7 @@ from .coref import CorefResolver, get_coref_resolver
 from .llm import (
     AnthropicBackend,
     Backend,
+    DeepSeekBackend,
     OllamaBackend,
     parse_class_json,
     parse_object_json,
@@ -45,7 +46,7 @@ from .schema import (
     Rule,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     # High-level API
@@ -59,6 +60,7 @@ __all__ = [
     "Backend",
     "OllamaBackend",
     "AnthropicBackend",
+    "DeepSeekBackend",
     # Parsers (for testing / custom flows)
     "parse_class_json",
     "parse_object_json",

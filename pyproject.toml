@@ -4,13 +4,13 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ontonym-core"
-version = "0.3.0"
+version = "0.4.0"
 description = "Turn free text into a typed object graph — classes, objects, properties, actions, relationships, rules, and events — with any LLM."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 authors = [{ name = "Serkan Uz" }]
-keywords = ["llm", "ontology", "extraction", "knowledge-graph", "ollama", "anthropic"]
+keywords = ["llm", "ontology", "extraction", "knowledge-graph", "ollama", "anthropic", "deepseek"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",

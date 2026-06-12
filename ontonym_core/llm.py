@@ -1,12 +1,15 @@
 """LLM backends for ontology extraction.
 
-Two backends share the same interface (`extract_classes`, `extract_objects`,
+Three backends share the same interface (`extract_classes`, `extract_objects`,
 `check_health`):
 
 - `OllamaBackend` — local Ollama, default model `llama3.1:8b`. No API key, runs
   on the developer's machine; great for trying the library.
 - `AnthropicBackend` — hosted Claude. Faster, costs API credits, needs
   `ANTHROPIC_API_KEY` in the environment (or passed explicitly).
+- `DeepSeekBackend` — hosted DeepSeek via its OpenAI-compatible API. Needs
+  `DEEPSEEK_API_KEY`; talks to `https://api.deepseek.com/chat/completions`
+  over plain httpx, so no extra SDK dependency.
 
 The LLM emits NAMES (snake_case English). This module returns Pydantic models
 keyed by those names — no surrogate ids, no FK ints, no DB layer.
@@ -811,6 +814,14 @@ class OllamaBackend:
 # ----------------------------------------------------------------------------
 
 
+def _model_rejects_temperature(model: str) -> bool:
+    """True for Claude models that deprecate the `temperature` sampling
+    parameter and 400 if it is sent (Opus 4.8 and later). Substring match so
+    aliases / dated suffixes are covered without an exhaustive list."""
+    m = (model or "").lower()
+    return "opus-4-8" in m
+
+
 _ANTHROPIC_SYSTEM_PROMPT = (
     "You extract structured ontologies from free text. "
     "Respond with strictly valid JSON ONLY — no markdown fences, no prose, "
@@ -836,6 +847,7 @@ class AnthropicBackend:
         *,
         model: str = "claude-sonnet-4-6",
         api_key: str | None = None,
+        base_url: str | None = None,
         max_tokens: int = 65536,
         temperature: float = 0.0,
         timeout: float = 120.0,
@@ -850,8 +862,14 @@ class AnthropicBackend:
         self.model = model
         self.max_tokens = max_tokens
         self.temperature = temperature
+        # `base_url=None` lets the SDK fall back to its default
+        # (`api.anthropic.com`) or to ANTHROPIC_BASE_URL if exported. Passing
+        # a value here lets a caller redirect to an Anthropic-compatible
+        # endpoint (e.g. DeepSeek's `https://api.deepseek.com/anthropic`)
+        # without the env-var dance.
         self._client = AsyncAnthropic(
             api_key=api_key or os.getenv("ANTHROPIC_API_KEY"),
+            base_url=base_url,
             timeout=timeout,
         )
         self._class_prompt = _CLASS_PROMPT_PATH.read_text(encoding="utf-8")
@@ -869,19 +887,23 @@ class AnthropicBackend:
             # infrastructure drops it, surfacing as APIConnectionError
             # ("Request timed out or interrupted"). Streaming keeps bytes
             # flowing so the connection survives long generations.
-            async with self._client.messages.stream(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                system=[
+            stream_kwargs = {
+                "model": self.model,
+                "max_tokens": self.max_tokens,
+                "system": [
                     {
                         "type": "text",
                         "text": _ANTHROPIC_SYSTEM_PROMPT,
                         "cache_control": {"type": "ephemeral"},
                     }
                 ],
-                messages=[{"role": "user", "content": user_prompt}],
-            ) as stream:
+                "messages": [{"role": "user", "content": user_prompt}],
+            }
+            # Newer Claude models (Opus 4.8+) deprecate `temperature` and reject
+            # the request outright if it's sent. Only pass it where supported.
+            if not _model_rejects_temperature(self.model):
+                stream_kwargs["temperature"] = self.temperature
+            async with self._client.messages.stream(**stream_kwargs) as stream:
                 # Drain deltas to keep the connection active; the SDK
                 # assembles the final Message (content + usage) for us.
                 async for _ in stream.text_stream:
@@ -968,4 +990,183 @@ class AnthropicBackend:
             "api_key_configured": bool(
                 self._client.api_key or os.getenv("ANTHROPIC_API_KEY")
             ),
+        }
+
+
+# ----------------------------------------------------------------------------
+# DeepSeek backend
+# ----------------------------------------------------------------------------
+
+
+# Mirrors `_ANTHROPIC_SYSTEM_PROMPT` but ALSO contains the literal token
+# "JSON" — DeepSeek's `response_format={"type":"json_object"}` mode hard-
+# requires that token in either the system or the user prompt, or the API
+# rejects the request.
+_DEEPSEEK_SYSTEM_PROMPT = (
+    "You extract structured ontologies from free text. "
+    "Respond with strictly valid JSON ONLY — no markdown fences, no prose, "
+    "no commentary. Output exactly the JSON object whose schema is described "
+    "in the user message. Use snake_case English names. If a section has no "
+    "entries, return an empty array for it. Do not invent classes that aren't "
+    "warranted by the text."
+)
+
+
+class DeepSeekBackend:
+    """Hosted DeepSeek backend via the OpenAI-compatible chat-completions API.
+
+    Reads `DEEPSEEK_API_KEY` from the environment if not passed explicitly.
+    Default model is `deepseek-chat` (V3). Pass `model="deepseek-reasoner"`
+    for R1 — note that reasoner emits a long `reasoning_content` field
+    alongside `content`; we read `content` only.
+
+    JSON output is requested via `response_format={"type":"json_object"}`,
+    which DeepSeek (like the OpenAI API) enforces only when the prompt
+    contains the literal word "JSON" — `_DEEPSEEK_SYSTEM_PROMPT` does.
+
+    No extra dependency: the request goes out as a plain httpx POST so the
+    library doesn't pull in `openai`.
+    """
+
+    def __init__(
+        self,
+        *,
+        model: str = "deepseek-chat",
+        api_key: str | None = None,
+        base_url: str = "https://api.deepseek.com",
+        # Reasoning models (deepseek-reasoner / v4 family) spend completion
+        # tokens on `reasoning_content` BEFORE emitting `content`; a small cap
+        # truncates the response mid-reasoning and `content` comes back empty.
+        max_tokens: int = 32768,
+        temperature: float = 0.0,
+        timeout: float = 600.0,
+    ):
+        self.model = model
+        self.api_key = api_key or os.getenv("DEEPSEEK_API_KEY")
+        self.base_url = base_url.rstrip("/")
+        self.max_tokens = max_tokens
+        self.temperature = temperature
+        self.timeout = timeout
+        self._class_prompt = _CLASS_PROMPT_PATH.read_text(encoding="utf-8")
+        self._object_prompt = _OBJECT_PROMPT_PATH.read_text(encoding="utf-8")
+
+    async def _invoke(self, user_prompt: str) -> str:
+        if not self.api_key:
+            raise RuntimeError(
+                "DEEPSEEK_API_KEY is not set — DeepSeekBackend cannot make requests."
+            )
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": _DEEPSEEK_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "response_format": {"type": "json_object"},
+            "stream": False,
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            try:
+                resp = await client.post(
+                    f"{self.base_url}/chat/completions",
+                    json=payload,
+                    headers=headers,
+                )
+            except httpx.ConnectError as exc:
+                raise RuntimeError(f"Cannot reach DeepSeek at {self.base_url}: {exc}") from exc
+            if resp.status_code != 200:
+                raise RuntimeError(
+                    f"DeepSeek API error {resp.status_code}: {resp.text[:500]}"
+                )
+        data = resp.json()
+        choices = data.get("choices") or []
+        if not choices:
+            raise RuntimeError(f"DeepSeek returned no choices: {data}")
+        content = (choices[0].get("message") or {}).get("content") or ""
+        finish = choices[0].get("finish_reason")
+        usage = data.get("usage") or {}
+        logger.info(
+            "DeepSeek %s: in=%s out=%s reasoning=%s cache_hit=%s finish=%s",
+            self.model,
+            usage.get("prompt_tokens"),
+            usage.get("completion_tokens"),
+            (usage.get("completion_tokens_details") or {}).get("reasoning_tokens"),
+            usage.get("prompt_cache_hit_tokens", 0),
+            finish,
+        )
+        if not content.strip():
+            # Reasoning models can exhaust max_tokens inside reasoning_content
+            # and return an empty answer — surface WHY instead of a JSON error.
+            raise RuntimeError(
+                f"DeepSeek returned empty content (finish_reason={finish!r}, "
+                f"completion_tokens={usage.get('completion_tokens')}). "
+                "If finish_reason is 'length', raise max_tokens — reasoning "
+                "models spend completion budget on reasoning_content first."
+            )
+        return content.strip()
+
+    async def extract_classes(
+        self,
+        text: str,
+        prior: ClassExtraction,
+        *,
+        candidate_class_names: list[str] | None = None,
+    ) -> ClassExtraction:
+        prompt = (
+            self._class_prompt
+            .replace("{previous_context}", render_previous_context(prior))
+            .replace(
+                "{known_classes}",
+                render_known_classes(prior, candidates=candidate_class_names),
+            )
+            .replace("{text}", text)
+        )
+        raw = await self._invoke(prompt)
+        return parse_class_json(raw)
+
+    async def extract_objects(
+        self,
+        text: str,
+        schema: ClassExtraction,
+        prior: ObjectExtraction,
+        *,
+        candidate_object_names: list[str] | None = None,
+        max_classes_in_prompt: int | None = None,
+        class_mention_counts: dict[str, int] | None = None,
+        reenrich: bool = False,
+    ) -> ObjectExtraction:
+        if not schema.classes:
+            return ObjectExtraction()
+        prompt = (
+            self._object_prompt
+            .replace(
+                "{class_schema}",
+                render_class_schema(
+                    schema,
+                    max_classes=max_classes_in_prompt,
+                    class_mention_counts=class_mention_counts,
+                ),
+            )
+            .replace(
+                "{known_objects}",
+                render_known_objects(
+                    prior, schema=schema, candidates=candidate_object_names,
+                ),
+            )
+            .replace("{reenrich_directive}", _REENRICH_DIRECTIVE if reenrich else "")
+            .replace("{text}", text)
+        )
+        raw = await self._invoke(prompt)
+        return parse_object_json(raw, schema)
+
+    async def check_health(self) -> dict[str, Any]:
+        return {
+            "deepseek_reachable": True,
+            "model": self.model,
+            "api_key_configured": bool(self.api_key),
         }
