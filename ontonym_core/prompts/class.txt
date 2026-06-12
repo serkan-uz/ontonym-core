@@ -133,6 +133,15 @@ mentions a "team", emit class `team`. If it mentions a "company", emit class `co
 it mentions a "department", emit class `department`. These are related but DIFFERENT
 classes — never merge them under a generic umbrella class like `organisation`.
 
+ENTITY vs ROLE/FACET RULE: a real-world THING and a ROLE that another party holds toward
+it are DIFFERENT classes — never fold the role into the thing. A company and your
+customer-record for it are two classes (`company` vs `customer`): the company attracts
+news and org-changes; the customer-record attracts tickets and renewals. Likewise a place
+is a `location`/`country`, while a market, jurisdiction, or territory DEFINED OVER that
+place is a SEPARATE object that references the place. One real-world entity can hold
+several such facets at once (customer AND vendor AND partner). Name the class for WHAT THE
+THING IS, never for someone's relationship to it.
+
 INHERITANCE RULE: if a class is a specialisation of another class — i.e. it IS-A
 that class with extra detail (e.g. `accounting_team` is a kind of `team`,
 `postgres_database` is a kind of `database`) — set `inherited_from` to the parent
