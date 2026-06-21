@@ -114,6 +114,25 @@ The test: would the specialised class declare at least one property or
 relationship the base class lacks? If not, it is a topic label — use the
 base class.
 
+COMPOUND CLASS NAME BAN (HARD RULE — zero exceptions):
+NEVER emit a class whose name is `<qualifier>_<base_class>` where
+`<base_class>` is an existing or potential base class. This pattern is ALWAYS
+wrong — the qualifier belongs as a property value or an action/relationship,
+never baked into the class name.
+Banned pattern examples (non-exhaustive):
+  `semiconductor_company` → use `company` + industry property or `produce` action
+  `insurance_company`     → use `company` + industry property
+  `tech_startup`          → use `startup` + industry property
+  `product_line`          → use `product` + a grouping relationship
+  `market_segment`        → use `market` or `segment` — pick one concept
+  `utility_company`       → use `company` + industry property
+  `electric_vehicle`      → use `vehicle` + type property
+  `cloud_service`         → use `service` + type property
+Mechanical test: if the class name contains an underscore, check whether the
+LAST word is itself a valid class (`company`, `product`, `service`, `team`,
+`person`, `event`, `market`, etc.). If yes, use that base class and express
+the qualifier through properties, actions, or relationships instead.
+
 DIFF-ONLY OUTPUT (CRITICAL — read carefully):
 Output ONLY entities that are NEW relative to KNOWN CLASSES + PREVIOUS CONTEXT below.
 - Do NOT re-emit a class that already appears in KNOWN CLASSES — skip it entirely.
