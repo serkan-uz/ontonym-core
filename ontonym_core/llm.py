@@ -370,7 +370,12 @@ def render_known_objects(
     seen: set[str] = set()
     deduped = [c for c in candidates if not (c in seen or seen.add(c))]
     return (
-        "STRONG CANDIDATE OBJECTS (semantically similar — reuse if any fits): "
+        "STRONG CANDIDATE OBJECTS — these ALREADY EXIST (each shown as "
+        "`name [class: X]`). If the text refers to one of these real things, you "
+        "MUST reuse its EXACT name AND emit it under its existing class X. Do NOT "
+        "coin a near-duplicate and do NOT re-type it into a new or different "
+        "class (an existing `accelerator` must stay `accelerator`, never become a "
+        "new `startup_incubator`): "
         + ", ".join(deduped)
         + "\n"
         + base
