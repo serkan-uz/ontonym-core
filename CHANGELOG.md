@@ -2,6 +2,19 @@
 
 All notable changes to ontonym-core will be documented here.
 
+## 0.5.0 — 2026-07-09
+
+Per-call token usage is now reported to callers. Backwards-compatible — a new
+method is added; no existing signatures change, so 0.4.x call sites keep working.
+
+- `drain_usage()` on the Anthropic and DeepSeek backends. Each LLM call
+  (`extract_classes` / `extract_objects`) records a usage entry
+  `{model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens}`;
+  `drain_usage()` returns and clears the accumulated list. Hosted callers meter
+  billing on real tokens instead of a size estimate. The Ollama backend does not
+  implement it (local, unmetered) — callers should feature-detect with
+  `hasattr(backend, "drain_usage")`.
+
 ## 0.3.0 — 2026-05-26
 
 Re-enrichment + coreference. Backwards-compatible — the new `extract_objects`

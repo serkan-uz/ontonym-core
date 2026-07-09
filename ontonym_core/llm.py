@@ -879,6 +879,18 @@ class AnthropicBackend:
         )
         self._class_prompt = _CLASS_PROMPT_PATH.read_text(encoding="utf-8")
         self._object_prompt = _OBJECT_PROMPT_PATH.read_text(encoding="utf-8")
+        # Per-call token usage accumulates here; callers meter on it via
+        # drain_usage() (returns + clears). Left un-drained it just grows.
+        self._usage: list[dict] = []
+
+    def drain_usage(self) -> list[dict]:
+        """Return and clear the per-call token-usage records accumulated since
+        the last drain. Each entry is `{model, input_tokens, output_tokens,
+        cache_read_tokens, cache_write_tokens}` — the shape the hosted billing
+        layer meters on."""
+        out = self._usage
+        self._usage = []
+        return out
 
     async def _invoke(self, user_prompt: str) -> str:
         try:
@@ -932,6 +944,13 @@ class AnthropicBackend:
             getattr(usage, "cache_read_input_tokens", 0) or 0,
             getattr(usage, "cache_creation_input_tokens", 0) or 0,
         )
+        self._usage.append({
+            "model": self.model,
+            "input_tokens": int(usage.input_tokens or 0),
+            "output_tokens": int(usage.output_tokens or 0),
+            "cache_read_tokens": int(getattr(usage, "cache_read_input_tokens", 0) or 0),
+            "cache_write_tokens": int(getattr(usage, "cache_creation_input_tokens", 0) or 0),
+        })
         return raw_text
 
     async def extract_classes(
@@ -1054,6 +1073,18 @@ class DeepSeekBackend:
         self.timeout = timeout
         self._class_prompt = _CLASS_PROMPT_PATH.read_text(encoding="utf-8")
         self._object_prompt = _OBJECT_PROMPT_PATH.read_text(encoding="utf-8")
+        # Per-call token usage accumulates here; callers meter on it via
+        # drain_usage() (returns + clears). Left un-drained it just grows.
+        self._usage: list[dict] = []
+
+    def drain_usage(self) -> list[dict]:
+        """Return and clear the per-call token-usage records accumulated since
+        the last drain. Each entry is `{model, input_tokens, output_tokens,
+        cache_read_tokens, cache_write_tokens}` — the shape the hosted billing
+        layer meters on."""
+        out = self._usage
+        self._usage = []
+        return out
 
     async def _invoke(self, user_prompt: str) -> str:
         if not self.api_key:
@@ -1104,6 +1135,13 @@ class DeepSeekBackend:
             usage.get("prompt_cache_hit_tokens", 0),
             finish,
         )
+        self._usage.append({
+            "model": self.model,
+            "input_tokens": int(usage.get("prompt_tokens", 0) or 0),
+            "output_tokens": int(usage.get("completion_tokens", 0) or 0),
+            "cache_read_tokens": int(usage.get("prompt_cache_hit_tokens", 0) or 0),
+            "cache_write_tokens": 0,
+        })
         if not content.strip():
             # Reasoning models can exhaust max_tokens inside reasoning_content
             # and return an empty answer — surface WHY instead of a JSON error.
