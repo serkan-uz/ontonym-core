@@ -1,7 +1,7 @@
 """LLM backends for ontology extraction.
 
-Three backends share the same interface (`extract_classes`, `extract_objects`,
-`check_health`):
+Three backends share the same interface (`extract_json`, `extract_classes`,
+`extract_objects`, `check_health`):
 
 - `OllamaBackend` — local Ollama, default model `llama3.1:8b`. No API key, runs
   on the developer's machine; great for trying the library.
@@ -91,6 +91,13 @@ class Backend(Protocol):
     the schema rendered into the prompt for very large ontologies — top-K
     classes by mention count get full detail, the tail is name-only.
     """
+
+    async def extract_json(
+        self,
+        prompt: str,
+        *,
+        system_prompt: str | None = None,
+    ) -> dict[str, Any]: ...
 
     async def extract_classes(
         self,
@@ -448,6 +455,24 @@ def _strip_fences(raw: str) -> str:
     return cleaned
 
 
+def parse_json_object(raw: str) -> dict[str, Any]:
+    """Parse generic LLM output as a JSON object.
+
+    This is the backend-neutral parser for API-owned extraction prompts.
+    Markdown JSON fences are tolerated, but arrays and scalar roots are
+    rejected so callers always receive a predictable mapping.
+    """
+    cleaned = _strip_fences(raw)
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        logger.error("LLM output is not valid JSON: %s", cleaned[:500])
+        raise ValueError(f"LLM did not produce valid JSON: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("LLM JSON output must be an object")
+    return data
+
+
 def parse_class_json(raw: str) -> ClassExtraction:
     """Parse the raw class-pass LLM JSON into a ClassExtraction."""
     cleaned = _strip_fences(raw)
@@ -711,7 +736,7 @@ class OllamaBackend:
         self._class_prompt = _CLASS_PROMPT_PATH.read_text(encoding="utf-8")
         self._object_prompt = _OBJECT_PROMPT_PATH.read_text(encoding="utf-8")
 
-    async def _generate(self, prompt: str) -> str:
+    async def _generate(self, prompt: str, *, system_prompt: str | None = None) -> str:
         payload: dict[str, Any] = {
             "model": self.model,
             "prompt": prompt,
@@ -725,6 +750,8 @@ class OllamaBackend:
                 "seed": self.seed,
             },
         }
+        if system_prompt is not None:
+            payload["system"] = system_prompt
         async with httpx.AsyncClient(timeout=self.timeout) as client:
             try:
                 resp = await client.post(f"{self.base_url}/api/generate", json=payload)
@@ -744,6 +771,13 @@ class OllamaBackend:
             tps = tokens / duration_s if duration_s > 0 else 0
             logger.info("Ollama: %d tokens, %.1fs, %.1f tok/s", tokens, duration_s, tps)
         return (data.get("response") or "").strip()
+
+    async def extract_json(
+        self, prompt: str, *, system_prompt: str | None = None,
+    ) -> dict[str, Any]:
+        """Run an API-owned prompt and return its JSON-object response."""
+        raw = await self._generate(prompt, system_prompt=system_prompt)
+        return parse_json_object(raw)
 
     async def extract_classes(
         self,
@@ -892,7 +926,9 @@ class AnthropicBackend:
         self._usage = []
         return out
 
-    async def _invoke(self, user_prompt: str) -> str:
+    async def _invoke(
+        self, user_prompt: str, *, system_prompt: str | None = None,
+    ) -> str:
         try:
             import anthropic
         except ImportError as exc:
@@ -910,7 +946,7 @@ class AnthropicBackend:
                 "system": [
                     {
                         "type": "text",
-                        "text": _ANTHROPIC_SYSTEM_PROMPT,
+                        "text": system_prompt or _ANTHROPIC_SYSTEM_PROMPT,
                         "cache_control": {"type": "ephemeral"},
                     }
                 ],
@@ -952,6 +988,13 @@ class AnthropicBackend:
             "cache_write_tokens": int(getattr(usage, "cache_creation_input_tokens", 0) or 0),
         })
         return raw_text
+
+    async def extract_json(
+        self, prompt: str, *, system_prompt: str | None = None,
+    ) -> dict[str, Any]:
+        """Run an API-owned prompt and return its JSON-object response."""
+        raw = await self._invoke(prompt, system_prompt=system_prompt)
+        return parse_json_object(raw)
 
     async def extract_classes(
         self,
@@ -1086,7 +1129,9 @@ class DeepSeekBackend:
         self._usage = []
         return out
 
-    async def _invoke(self, user_prompt: str) -> str:
+    async def _invoke(
+        self, user_prompt: str, *, system_prompt: str | None = None,
+    ) -> str:
         if not self.api_key:
             raise RuntimeError(
                 "DEEPSEEK_API_KEY is not set — DeepSeekBackend cannot make requests."
@@ -1094,7 +1139,7 @@ class DeepSeekBackend:
         payload: dict[str, Any] = {
             "model": self.model,
             "messages": [
-                {"role": "system", "content": _DEEPSEEK_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt or _DEEPSEEK_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": self.temperature,
@@ -1152,6 +1197,13 @@ class DeepSeekBackend:
                 "models spend completion budget on reasoning_content first."
             )
         return content.strip()
+
+    async def extract_json(
+        self, prompt: str, *, system_prompt: str | None = None,
+    ) -> dict[str, Any]:
+        """Run an API-owned prompt and return its JSON-object response."""
+        raw = await self._invoke(prompt, system_prompt=system_prompt)
+        return parse_json_object(raw)
 
     async def extract_classes(
         self,

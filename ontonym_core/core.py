@@ -1,7 +1,9 @@
 """High-level stateless extraction API.
 
-Three async entry points:
+Four async entry points:
 
+  - `extract_json(prompt, *, backend=..., system_prompt=...)` — generic JSON extraction
+    for caller-owned prompts.
   - `extract_classes(text, *, backend=..., prior=...)` — class-level pass.
   - `extract_objects(text, schema, *, backend=..., prior=...)` — object-level pass.
   - `extract(text, *, mode="both", backend=..., prior_classes=..., prior_objects=...)` —
@@ -14,7 +16,7 @@ constructed from environment variables.
 from __future__ import annotations
 
 import os
-from typing import Literal
+from typing import Any, Literal
 
 from .llm import AnthropicBackend, Backend, DeepSeekBackend, OllamaBackend
 from .schema import ClassExtraction, Extraction, ObjectExtraction
@@ -44,6 +46,23 @@ def _resolve_backend(backend: BackendLike) -> Backend:
             "'deepseek', or pass a Backend instance."
         )
     return backend
+
+
+async def extract_json(
+    prompt: str,
+    *,
+    backend: BackendLike = "ollama",
+    system_prompt: str | None = None,
+) -> dict[str, Any]:
+    """Run a caller-owned extraction prompt through a core backend.
+
+    The backend enforces JSON output and returns a JSON object as a plain
+    dictionary. Prompt construction and element-specific validation belong to
+    the caller, making this suitable for actions, rules, stances, and other
+    extraction passes that are not part of core's fixed ontology models.
+    """
+    b = _resolve_backend(backend)
+    return await b.extract_json(prompt, system_prompt=system_prompt)
 
 
 async def extract_classes(

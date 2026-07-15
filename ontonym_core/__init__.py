@@ -16,7 +16,7 @@ See README.md for the full API.
 """
 from __future__ import annotations
 
-from .core import extract, extract_classes, extract_objects
+from .core import extract, extract_classes, extract_json, extract_objects
 from .coref import CorefResolver, get_coref_resolver
 from .llm import (
     AnthropicBackend,
@@ -24,6 +24,7 @@ from .llm import (
     DeepSeekBackend,
     OllamaBackend,
     parse_class_json,
+    parse_json_object,
     parse_object_json,
     render_class_schema,
     render_known_classes,
@@ -51,6 +52,7 @@ __version__ = "0.4.0"
 __all__ = [
     # High-level API
     "extract",
+    "extract_json",
     "extract_classes",
     "extract_objects",
     # Coreference pre-pass
@@ -63,6 +65,7 @@ __all__ = [
     "DeepSeekBackend",
     # Parsers (for testing / custom flows)
     "parse_class_json",
+    "parse_json_object",
     "parse_object_json",
     # Prompt rendering helpers (for callers building their own prompts on top)
     "render_known_classes",

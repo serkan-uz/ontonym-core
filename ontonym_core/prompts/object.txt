@@ -6,38 +6,19 @@ Object instances split into two top-level collections:
 {reenrich_directive}
 # WHAT IS AN OBJECT (read carefully — this overrides every other rule)
 
-An object is a specific, NAMED, PERSISTENT thing with stable identity over time.
+An object is a specific instance mentioned in the text that can be bound to a
+class in the fixed schema. For every supplied class, find all of its instances
+in the text and emit them. Do not reject an instance because it is mentioned
+only once or is unnamed but distinct.
 Concrete examples: PaymentService, Sarah, dbt, AuthService, prod-db-01, PD-3286,
 the London office, "feature/user-profile" (a specific branch), "iOS build" (a
 specific build), NT-1247 (a specific ticket), "müşteri ödeme entegrasyonu" (a
-specific feature). The name refers to ONE real thing that someone could point
-at, search for, or own — and that will keep existing in the next document too.
+specific feature). Each distinct mention that denotes one instance should be
+emitted when a compatible schema class exists.
 
-An object is NOT (EXCEPT for `todo` — see the TODO EXCEPTION below):
-  • a verb phrase or imperative ("add a metric", "tune the pool", "investigate X");
-  • a description of work to be done, planned, intended, or recommended;
-  • a bullet from an action-items / next-steps / todo / recommendations /
-    follow-ups / suggestions list;
-  • a symptom, observation, hypothesis, or one-off remark;
-  • an attribute or value of another object (a status value, a version, a
-    number — these are `properties`; a status TRANSITION between two values is
-    a `status_change` event, see STATUS AND STATUS CHANGES below).
-
-NAME-SHAPE RULE: if a candidate object's name starts with an English verb
-(add, tune, fix, alert, investigate, review, improve, increase, decrease,
-monitor, write, raise, send, schedule, deploy, …) and refers to future work,
-it is a TASK, not an object — skip it (EXCEPT `todo`, below). Object names are
-noun phrases that identify named, real things, not sentences.
-
-TODO EXCEPTION: the two rules above skip work-phrases ONLY when the schema has
-no `todo` class. If the schema DOES declare `todo`, then each genuine OPEN
-action item — an explicit to-do/checklist item, a "TODO:" marker, or a "we
-need to / I have to / don't forget to …" obligation that has NOT yet happened —
-IS a `todo` object. Name it from the imperative as a snake_case slug
-(`buy_gift`, `call_landlord`, `finish_slides`) with the phrase as display_name;
-set `status`="open" and, when stated, `due`. Link the responsible person with
-an `assigned_to` relationship (todo → person). Work that ALREADY happened is an
-action, not a todo; a vague wish or feeling is neither.
+Attributes or values of another object (such as a status value, version, or
+number) remain properties rather than separate objects. A status transition is
+a `status_change` event when that class exists in the schema.
 
 RECALL POLICY: subject to the definition above, you are evaluated on RECALL
 across legitimate instances. If a thing IS an object by the rules above, emit
@@ -110,134 +91,26 @@ Bind each to the specific object it characterises (the program, the project,
 the deal). If the schema lacks a suitable property name, use the closest
 existing one or a sensibly-named new one — do not drop the fact.
 
-# FOLLOW-UP LISTS — `todo` OBJECTS IF THE SCHEMA HAS `todo`, ELSE A PROPERTY
-
-When the text contains a list of follow-up work attached to a parent thing —
-"Action items: …", "Next steps: …", "Recommendations: …", "TODO: …",
-"Follow-ups: …", "Suggestions: …", or any equivalent:
-  - IF the schema declares a `todo` class: emit each OPEN item as its own
-    `todo` object (per the TODO EXCEPTION above), and relate it to the parent
-    (post_mortem, meeting, decision, review, incident, …) — e.g. a `concerns`
-    or `assigned_to` relationship. The parent is still ONE object.
-  - ELSE (no `todo` class in the schema): emit the PARENT as ONE object and
-    fold the list into a single TEXT property on it (action_items, next_steps,
-    recommendations, … — match what the text calls the list), items joined with
-    "; ". Do NOT emit one object per bullet in this case.
-
-
 # SCHEMA RULES
 
 1. ONLY emit instances of classes that appear in the CLASS SCHEMA. Drop instances of
    unknown classes (do not invent classes here — class extraction is a separate phase).
 2. ONLY emit property names that are defined on the relevant class.
-3. ONLY emit action names and relationship types that exist in the schema.
-4. If the schema is missing a class/property/action you wish you had, OMIT that detail
+3. ONLY emit relationship types that exist in the schema.
+4. If the schema is missing a class, property, or relationship you wish you had, OMIT that detail
    silently — do not invent.
 
 INHERITANCE: when a class entry in the schema below has an `inherits: <parent>` line, that
-class transparently owns every property/action/relationship of its parent (and that
+class transparently owns every property/relationship of its parent (and that
 parent's ancestors) in addition to its own. You may set those inherited properties on
 instances of the child class without re-declaring them. Do not duplicate inherited
 properties on the parent — set them on the specific instance whose class is the child.
 
-ACTOR-LESS HAPPENINGS RULE: decide between an `object_action` and an event:
-  - "Sarah deployed PaymentService at 14:02" — ACTOR present → emit an entry in
-    `actions` (action_name: deploy, actor: sarah, target: payment_service,
-    occurred_at: 14:02).
-  - "An outage hit PaymentService at 14:02" — NO actor → emit an entry in
-    `events` whose class inherits from `event` (e.g. `outage`, `incident`),
-    bind `occurred_at` and `summary` via the `properties` array (object_name
-    matches the event's `name`), and add an `affected` relationship to
-    PaymentService. Same pattern for releases, deployments without a named
-    deployer, decisions, market events.
-  - "GDPR took effect on 2018-05-25" — NO actor and NO affected target → emit
-    a STANDALONE entry in `events` with `occurred_at` and `summary` properties.
-    Events can be external (regulatory, market) or internal and don't need an
-    `affected` relationship to be valid.
-Do NOT shoehorn actor-less happenings into `actions` with a null actor —
-emit an event-class instance instead in the `events` array. If the schema
-does not include an event subclass for the kind of happening you see, drop
-it (class extraction will pick it up on a future ingestion).
-
-VERB-INSTANCE EMISSION (high-recall actions):
-
-For every sentence in the input where an actor object AND a target object are
-both resolvable from KNOWN OBJECTS or the current emit set, emit ONE entry in
-`actions[]` per transitive verb in the sentence. This is the mechanical bar
-that captures the connective tissue of who did/said/proposed/agreed what to
-whom — the load-bearing detail for downstream Q&A.
-
-Required fields per emission:
-  - `action_name` = the lemmatized verb (apply the same LEMMATIZATION RULE
-    described in the class prompt: presented → present, discussing → discuss,
-    agreed on → agree_on). Must match an action already declared in the
-    schema; if not present, drop silently.
-    HARD RULE: never emit a past-tense, gerund, or 3rd-person-singular form
-    as the `action_name`. If you catch yourself writing `presented` or
-    `agreeing` or `presents`, stop and convert to the infinitive.
-  - `actor` = canonical name of the subject object.
-  - `target` = canonical name of the DIRECT object (the thing acted on). For
-    transfer verbs (give/send/pay/offer/hand/…) this is the THING TRANSFERRED,
-    never the recipient — see DITRANSITIVE VERBS below.
-  - `occurred_at` = sentence-level timestamp if inferable from the text,
-    else null.
-  - `description` = a SPECIFIC, FACT-BEARING paraphrase of the sentence,
-    100–200 chars. This is the load-bearing field for Q&A — the reader
-    should be able to answer "what about X?" from the description alone.
-    Examples:
-      - BAD (vague): "discussed the service"
-      - GOOD (specific): "didn't stop the perinatal mental health service
-        but flagged inpatient-care shortage during the outbreak"
-      - BAD (verbatim quote): "Well, you know, I think we still kept it
-        running through everything..."
-      - GOOD (extracted gist): "kept service running through pandemic;
-        warned beds were insufficient and uptake was dropping"
-    The description IS the meaning we keep — the source sentence stays in
-    the source system per the "never persist source content" rule. Don't
-    quote verbatim; extract the gist.
-
-Multi-verb sentences ("Sarah said John would deploy X") produce one action
-per verb whose actor + target are both resolvable, in the order they appear:
-  - (sarah, say, john) — "Sarah reports John's planned deployment"
-  - (john, deploy, x)  — "John will deploy X" (modals/futures strip; the
-    description carries the modality)
-
-Skip verbs where actor or target cannot be resolved without inventing
-entities. Do NOT emit `(unknown, said, x)` or `(speaker_5, propose, mic)`
-placeholders.
-
-DITRANSITIVE / TRANSFER VERBS (give, send, hand, pass, offer, lend, pay, owe,
-award, gift, bring, mail, throw, sell, tell, show, teach, …) name three roles —
-actor (giver), theme (the thing transferred), recipient (who receives it). The
-binary `(actor, verb, target)` shape only holds two, so apply ONE deterministic
-convention so "X gave Y a Z" always extracts the same way:
-  - `target` = the THEME (the thing transferred), NEVER the recipient.
-      "Phoebe gave Lizzie a cigarette" → (phoebe, give, cigarette)
-      "Ross sent Rachel the photos"     → (ross, send, photo)
-      "Chandler paid Joey the rent"     → (chandler, pay, rent)
-  - capture the RECIPIENT as a SEPARATE relationship in `relationships[]`,
-    from the theme object to the recipient object. The relationship type MUST be
-    EXACTLY `recipient` — never coin a synonym (`given_to`, `sent_to`,
-    `paid_to`, `gift_to`, `goes_to`); reuse the `recipient` type the class pass
-    declares so every transfer lands under one type:
-      {source: cigarette, target: lizzie, type: recipient}
-      {source: photo, target: rachel, type: recipient}
-  - if no theme is stated ("Phoebe called Lizzie"), the verb is NOT a transfer
-    — emit the ordinary `(phoebe, call, lizzie)` action with the person as the
-    target and no recipient relationship.
-This is the fix for the inconsistency where "X gave Y a Z" sometimes recorded
-the gift as the target and sometimes the recipient. The gift is ALWAYS the
-target; the recipient is ALWAYS a `recipient` relationship (that exact type).
-
-Skip auxiliaries, modals, copular, and pure-existence verbs (same list as
-the class prompt: be/have/do/get/let, can/could/will/would/shall/should/
-may/might/must/ought, is/are/was/were/seem/appear/become/remain, exist/
-occur/happen).
-
-DIFF-ONLY still applies to actions: a triple `(action, actor, target)` that
-already exists in KNOWN OBJECTS is deduplicated downstream, but each FRESH
-occurrence (different `occurred_at` or different `description`) is new
-content — emit it.
+EVENT INSTANCES: when a supplied class inherits from `event`, emit each of its
+instances in `events[]`. Bind supported properties such as `occurred_at` and
+`summary`, and instantiate any supplied relationship to other objects. Event
+instances may be internal or external and do not require a relationship to be
+valid. If no compatible event class exists in the schema, omit the instance.
 
 # CANONICAL NAME RULES
 
@@ -250,7 +123,7 @@ Object "name" is a canonical snake_case identifier. Derivation patterns:
   - Phrase "müşteri ödeme entegrasyonu"         → name="customer_payment_integration", display_name="müşteri ödeme entegrasyonu"
 
 If the text uses multiple spellings for the same real-world thing, pick ONE canonical name
-and use it everywhere downstream (properties, actions, relationships).
+and use it everywhere downstream (properties and relationships).
 
 MATCH KNOWN OBJECTS BY REFERENT, NOT BY STRING. Before emitting an object, check whether
 the SAME real-world thing already appears in KNOWN OBJECTS (grouped by class above) —
@@ -269,19 +142,19 @@ whether a mention is an existing object or a new one, prefer reusing the existin
 
 # DIFF-ONLY OUTPUT (CRITICAL — read carefully)
 
-Output ONLY entities/relationships/actions that are NEW relative to KNOWN OBJECTS and
+Output ONLY entities, properties, and relationships that are NEW relative to KNOWN OBJECTS and
 the CLASS SCHEMA below.
 - Do NOT re-emit an object/event whose canonical name is already in KNOWN OBJECTS.
   Skip it entirely from `objects[]` and `events[]`.
-- Do NOT re-emit a property/action/relationship whose tuple is already implied by the
+- Do NOT re-emit a property or relationship whose tuple is already implied by the
   schema + known instances. Downstream callers deduplicate by tuple, so re-emissions
   are silently dropped and only waste your output tokens.
-- DO emit fresh occurrences: a new object_action between two known objects is still
+- DO emit fresh facts: a new relationship between two known objects is still
   new content; emit it. A new object_property value (different from any prior value
   for that property) is conflicting evidence — emit it.
 Empty arrays are valid and expected when the chunk only re-mentions known entities
 without introducing new instances or new occurrences. If literally nothing in this
-chunk is new, return all five arrays empty.
+chunk is new, return all four arrays empty.
 
 DIFF-ONLY DOES NOT MEAN "EMIT NOTHING WHEN MOST THINGS ARE KNOWN". A new speaker on
 a chat line, a new ticket id, a new branch name — any single new instance — is
@@ -316,14 +189,13 @@ RECOGNIZE THESE PATTERNS AS COMMITMENTS (emit `events[]` with class_name='commit
   - "I'll X by <date>", "I will own X", "leave it with me"
   - "X will do Y", "Sarah will handle the renewal"
   - Assignments stated in the exchange: "<name> is going to <verb> <thing>"
-  - Promised follow-ups: "we'll circle back next week with X"
 
 RECOGNIZE THESE AS DISCUSSIONS (emit `events[]` with class_name='discussion'
 when the schema includes it, otherwise fold into `decision` with a
 descriptive summary):
   - A topic block where multiple parties exchange views without reaching
     a firm decision ("we talked about X — A thinks Y, B thinks Z").
-  - Q&A pairs that record what someone thinks/believes/recommends about
+  - Q&A pairs that record what someone thinks or believes about
     a specific topic ("What did she think about X? — She said Y").
   - Use the topic as the basis for the `name` (e.g. `caching_strategy_tradeoffs`,
     `q3_pricing_options`). Put participating speakers as
@@ -419,7 +291,7 @@ Read carefully — the rules are GENERAL (define the shape of a decision /
 commitment, not a list of examples), so they cover every domain the model
 will see.
 
-A line IS A DECISION when it states an OUTCOME that fixes future behaviour
+A line IS A DECISION when it states a binding outcome
 and the speaker has the authority (explicit or implied) to fix it.
 Examples of decision shape: "we'll honour 10%", "Postgres is the
 primary store", "moving the renewal to Q3", "the answer is no". Emit:
@@ -435,7 +307,7 @@ primary store", "moving the renewal to Q3", "the answer is no". Emit:
     person if the schema includes it.
 
 A line IS A COMMITMENT when the speaker takes responsibility for a
-future outcome targeted at a specific thing.
+specific outcome targeted at a specific thing.
 Examples of commitment shape: "I'll send the report by Friday", "Sarah
 will own the renewal", "we'll get this fixed by end of week".
 For "I'll <verb> <thing>" (the speaker is the actor):
@@ -450,13 +322,9 @@ NAMES someone else):
   - same shape, but the speaker is `reported_by` and X is the actor.
 
 A line IS NOT a decision or commitment if:
-  - the work is already done ("I sent the report yesterday") — that's a
-    past action, model it in `actions[]` instead.
+  - the work is already done ("I sent the report yesterday").
   - the speaker hedges ("we could", "we might", "I'd like to") — no
     fixed outcome, no responsibility taken. Skip.
-  - it's a recommendation in a follow-ups / action-items list — those
-    become `todo` objects (or fold into the parent property) per the
-    FOLLOW-UP LISTS rule above; do not promote them to decisions/commitments.
   - it's a status report ("Q3 numbers are in") — that's a measurement
     or an event of a different class, not a decision.
 
@@ -508,9 +376,8 @@ closed", "the account was locked"), emit:
     status changed.
   - a `relationships[]` `reported_by` edge to the person who made the change, when
     one is named.
-A status_change USUALLY co-occurs with the action that caused it. Emit BOTH — the
-action records WHO did WHAT (action_name `close`, actor, target); the status_change
-records the resulting STATE MOVE that the object's history and any flow depend on.
+A status_change records the resulting state move that the object's history and
+any flow depend on.
 
 WORKED SHAPE (illustrative — match the actual schema):
 INPUT: "Marcus closed the Acme renewal — it's won now (was in negotiation)."
@@ -524,9 +391,6 @@ properties[]:
    "name":"to_status","value":"won","data_type":"string"}
   {"class_name":"deal","object_name":"acme_renewal","name":"status",
    "value":"won","data_type":"string"}
-actions[]:
-  {"action_name":"close","actor":"marcus","target":"acme_renewal",
-   "description":"Marcus closed the Acme renewal","occurred_at":null}
 relationships[]:
   {"source":"acme_renewal_to_won","target":"acme_renewal","type":"affected",
    "description":"The renewal whose status changed"}
@@ -570,15 +434,6 @@ relationships[]:
       "data_type": "string|number|boolean|date|null"
     }
   ],
-  "actions": [
-    {
-      "action_name": "<existing action name>",
-      "actor": "<canonical object name>",
-      "target": "<canonical object name or null>",
-      "description": "<short English description of this specific occurrence>",
-      "occurred_at": "<ISO 8601 datetime if known, else null>"
-    }
-  ],
   "relationships": [
     {
       "source": "<canonical object/event name>",
@@ -597,7 +452,7 @@ diagnosed a stuck job on prod-db-01. She restarted the worker; the alert cleared
 14:18. Wrote the post-mortem the next day."
 
 ASSUMING SCHEMA HAS: person, alert (inherits event), incident (inherits event),
-database, post_mortem, plus actions detect, triage, resolve, write.
+database, post_mortem, and the relationships shown below.
 
 EXPECTED OUTPUT (illustrative — your output must match the actual schema given below):
 {
@@ -615,12 +470,6 @@ EXPECTED OUTPUT (illustrative — your output must match the actual schema given
     {"class_name": "incident", "object_name": "pd_9981_incident", "name": "occurred_at", "value": "2026-05-05T14:02:00", "data_type": "date"},
     {"class_name": "incident", "object_name": "pd_9981_incident", "name": "summary",     "value": "Stuck worker on prod-db-01", "data_type": "string"}
   ],
-  "actions": [
-    {"action_name": "detect",  "actor": "sarah", "target": "pd_9981_incident", "description": "Sarah picked up the alert", "occurred_at": "2026-05-05T14:02:00"},
-    {"action_name": "triage",  "actor": "sarah", "target": "pd_9981_incident", "description": "Diagnosed within 10 min",   "occurred_at": "2026-05-05T14:12:00"},
-    {"action_name": "resolve", "actor": "sarah", "target": "pd_9981_incident", "description": "Restarted the worker; alert cleared", "occurred_at": "2026-05-05T14:18:00"},
-    {"action_name": "write",   "actor": "sarah", "target": "pd_9981_post_mortem", "description": "Post-mortem written next day", "occurred_at": "2026-05-06T10:00:00"}
-  ],
   "relationships": [
     {"source": "pd_9981", "target": "pd_9981_incident", "type": "triggers", "description": "Alert triggered the incident"},
     {"source": "pd_9981_incident", "target": "prod_db_01", "type": "affected", "description": "Incident affected prod-db-01"}
@@ -632,7 +481,7 @@ EXPECTED OUTPUT (illustrative — your output must match the actual schema given
 INPUT TEXT:
 "[09:02] Jin: On it, picking up PD-3286"
 
-ASSUMING SCHEMA HAS: person, incident (inherits event), plus action `triage`.
+ASSUMING SCHEMA HAS: person and incident (inherits event).
 ASSUMING KNOWN OBJECTS already includes pd_3286 (incident) but NOT jin.
 
 EXPECTED OUTPUT:
@@ -644,17 +493,13 @@ EXPECTED OUTPUT:
   "properties": [
     {"class_name": "person", "object_name": "jin", "name": "name", "value": "Jin", "data_type": "string"}
   ],
-  "actions": [
-    {"action_name": "triage", "actor": "jin", "target": "pd_3286", "description": "Jin picked up PD-3286", "occurred_at": "09:02"}
-  ],
   "relationships": []
 }
 
 Note: pd_3286 is in KNOWN OBJECTS so it does NOT reappear in `events[]`. Jin is
-NEW so they MUST appear in `objects[]` even though the line is short. The
-action is fresh content (new actor on a known target) so it MUST appear too.
+NEW so they MUST appear in `objects[]` even though the line is short.
 
-# CLASS SCHEMA (the only allowed classes, properties, actions, relationships)
+# CLASS SCHEMA (the only allowed classes, properties, and relationships)
 
 {class_schema}
 

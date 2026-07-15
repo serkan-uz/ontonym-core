@@ -100,7 +100,7 @@ ontonym-core extract --text "..." --backend anthropic
 
 ```python
 import asyncio
-from ontonym_core import extract, extract_classes, extract_objects, OllamaBackend
+from ontonym_core import extract, extract_classes, extract_json, extract_objects, OllamaBackend
 
 # One-shot: class pass + object pass against the resulting schema.
 result = asyncio.run(extract(
@@ -115,18 +115,37 @@ objects = asyncio.run(extract_objects("...", schema, backend=backend))
 
 # Diff-only iteration: feed the prior accumulator to skip already-known rows.
 schema_v2 = asyncio.run(extract_classes("more text...", backend=backend, prior=schema))
+
+# Run an application-owned extraction prompt through the same backend.
+stances = asyncio.run(extract_json(
+    "Extract stances from the input and return {\"stances\": [...]}",
+    backend=backend,
+    system_prompt="Return a valid JSON object only.",
+))
 ```
 
 The result models are plain Pydantic — `.model_dump_json()` for JSON, `.model_dump()` for dicts, and full type hints for IDE autocomplete.
 
 ## Custom backends
 
-A backend is anything implementing `Backend` from `ontonym_core.llm` — two async methods (`extract_classes`, `extract_objects`) and one health probe (`check_health`). You can wire OpenAI, Together, Groq, or your own gateway by reusing the parsers:
+A backend is anything implementing `Backend` from `ontonym_core.llm` — generic
+`extract_json`, the two ontology methods (`extract_classes`, `extract_objects`),
+and `check_health`. You can wire OpenAI, Together, Groq, or your own gateway by
+reusing the parsers:
 
 ```python
-from ontonym_core import parse_class_json, parse_object_json, ClassExtraction
+from ontonym_core import (
+    ClassExtraction,
+    parse_class_json,
+    parse_json_object,
+    parse_object_json,
+)
 
 class MyBackend:
+    async def extract_json(self, prompt, *, system_prompt=None):
+        raw = await my_llm.generate(prompt, system=system_prompt)
+        return parse_json_object(raw)
+
     async def extract_classes(self, text, prior):
         raw = await my_llm.generate(prompt_for_classes(text, prior))
         return parse_class_json(raw)
