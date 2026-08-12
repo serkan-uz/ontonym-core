@@ -23,6 +23,7 @@ from .llm import (
     Backend,
     DeepSeekBackend,
     OllamaBackend,
+    OpenAIBackend,
     parse_class_json,
     parse_json_object,
     parse_object_json,
@@ -63,6 +64,7 @@ __all__ = [
     "OllamaBackend",
     "AnthropicBackend",
     "DeepSeekBackend",
+    "OpenAIBackend",
     # Parsers (for testing / custom flows)
     "parse_class_json",
     "parse_json_object",

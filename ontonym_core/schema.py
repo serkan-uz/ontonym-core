@@ -1,8 +1,10 @@
 """Pydantic models for ontonym-core extraction output.
 
-Stateless — no surrogate ids, no FK ints, no approval status, no tenant scoping.
-Cross-references are by NAME (snake_case string). This matches the LLM's raw
-output shape and lets callers consume the result without any persistence layer.
+Stateless — no surrogate ids, no FK ints, no approval status, no tenant scoping
+(sole carve-out: `ObjectProperty.ref_object_id`, populated only when the models
+mirror persisted rows — never by the LLM). Cross-references are by NAME
+(snake_case string). This matches the LLM's raw output shape and lets callers
+consume the result without any persistence layer.
 
 Two top-level containers:
   - `ClassExtraction`: schema-level — classes, their properties, actions,
@@ -11,6 +13,11 @@ Two top-level containers:
     happenings), object_properties, object_actions, object_relationships.
 
 Both are fully serialisable to JSON via `.model_dump_json()`.
+
+Note: the persistence layer stores occurrence-level edges (`ObjectAction`,
+`ObjectRelationship`) as typed occurrence objects, not physical tables; the
+by-name shapes here remain the raw extraction output the writer resolves
+into those refs.
 """
 from __future__ import annotations
 
@@ -49,11 +56,21 @@ class Action(BaseModel):
 
 
 class Relationship(BaseModel):
-    """A typed link between two classes — `(source=person, type=works_in, target=team)`."""
+    """A typed link between two classes — `(source=person, type=works_in, target=team)`.
+
+    Persistence stores templates as objects of the seed `relationship` class,
+    keeping the endpoints as class NAME strings (no physical relationships
+    table since migration 0026), and reads them back flat via
+    `relationships_view`; this by-name shape is already what the writer wants.
+    """
 
     source: str
     target: str
     type: str
+    # The TARGET->SOURCE reading of the same link (`child_of` for
+    # `parent_of`; equal to `type` when the link is symmetric). Optional:
+    # an extractor that omits it leaves readers on the direction fallback.
+    inverse_type: str | None = None
     description: str | None = None
 
 
@@ -103,10 +120,25 @@ class ObjectProperty(BaseModel):
     name: str
     value: str | None = None
     data_type: str | None = None
+    ref_object_id: int | None = Field(
+        None,
+        description=(
+            "Object-valued property: FK to objects.id in the persistence "
+            "layer (data_type 'ref'; `value` stays None). Always None in raw "
+            "extraction output — cross-references here are by name — and "
+            "populated only when these models mirror persisted rows."
+        ),
+    )
 
 
 class ObjectAction(BaseModel):
-    """A specific occurrence of an action between specific objects."""
+    """A specific occurrence of an action between specific objects.
+
+    Persistence stores occurrences as `action_occurrence` objects with ref
+    properties (no physical object_actions table since migration 0024) and
+    reads them back flat via `object_actions_view`; this by-name shape is
+    the raw extraction output the writer resolves into those refs.
+    """
 
     action_name: str
     actor: str | None = None
@@ -118,7 +150,15 @@ class ObjectAction(BaseModel):
 
 
 class ObjectRelationship(BaseModel):
-    """A specific typed link between two specific objects."""
+    """A specific typed link between two specific objects.
+
+    Persistence stores these as `relationship_occurrence` objects with ref
+    properties (no physical object_relationships table since migration 0025)
+    and reads them back flat via `object_relationships_view`; this by-name
+    shape is the raw extraction output the writer resolves into those refs —
+    including the `relationship` ref to the class-level template object, which
+    is a real FK since migration 0026 (it was a soft id-as-text scalar).
+    """
 
     source: str
     target: str

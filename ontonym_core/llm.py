@@ -1,6 +1,6 @@
 """LLM backends for ontology extraction.
 
-Three backends share the same interface (`extract_json`, `extract_classes`,
+Four backends share the same interface (`extract_json`, `extract_classes`,
 `extract_objects`, `check_health`):
 
 - `OllamaBackend` — local Ollama, default model `llama3.1:8b`. No API key, runs
@@ -10,6 +10,8 @@ Three backends share the same interface (`extract_json`, `extract_classes`,
 - `DeepSeekBackend` — hosted DeepSeek via its OpenAI-compatible API. Needs
   `DEEPSEEK_API_KEY`; talks to `https://api.deepseek.com/chat/completions`
   over plain httpx, so no extra SDK dependency.
+- `OpenAIBackend` — hosted OpenAI via the Responses API. Needs
+  `OPENAI_API_KEY`; uses structured JSON output without an SDK dependency.
 
 The LLM emits NAMES (snake_case English). This module returns Pydantic models
 keyed by those names — no surrogate ids, no FK ints, no DB layer.
@@ -219,7 +221,7 @@ def render_class_schema(
     props_by_class: dict[str, list[str]] = {}
     for p in schema.properties:
         props_by_class.setdefault(p.class_name, []).append(
-            f"{p.name}:{p.data_type or 'str'}"
+            f"{p.name}:{p.data_type or 'string'}"
         )
 
     all_classes = list(schema.classes)
@@ -539,7 +541,9 @@ def parse_class_json(raw: str) -> ClassExtraction:
             continue
         relationships.append(
             Relationship(
-                source=src, target=tgt, type=rtype, description=r.get("description")
+                source=src, target=tgt, type=rtype,
+                inverse_type=r.get("inverse_type") or None,
+                description=r.get("description"),
             )
         )
 
@@ -1058,6 +1062,190 @@ class AnthropicBackend:
                 self._client.api_key or os.getenv("ANTHROPIC_API_KEY")
             ),
         }
+
+
+# ----------------------------------------------------------------------------
+# OpenAI backend
+# ----------------------------------------------------------------------------
+
+
+_OPENAI_SYSTEM_PROMPT = (
+    "You extract structured ontologies from free text. "
+    "Return exactly one valid JSON object and no prose or markdown."
+)
+
+
+class OpenAIBackend:
+    """OpenAI backend using the Responses API and structured JSON output."""
+
+    def __init__(
+        self,
+        *,
+        model: str = "gpt-5-mini",
+        api_key: str | None = None,
+        base_url: str = "https://api.openai.com/v1",
+        max_output_tokens: int = 32768,
+        timeout: float = 300.0,
+    ):
+        self.model = model
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        self.base_url = base_url.rstrip("/")
+        self.max_output_tokens = max_output_tokens
+        self.timeout = timeout
+        self._class_prompt = _CLASS_PROMPT_PATH.read_text(encoding="utf-8")
+        self._object_prompt = _OBJECT_PROMPT_PATH.read_text(encoding="utf-8")
+        self._usage: list[dict] = []
+
+    def drain_usage(self) -> list[dict]:
+        out = self._usage
+        self._usage = []
+        return out
+
+    @staticmethod
+    def _response_text(data: dict[str, Any]) -> str:
+        chunks: list[str] = []
+        for item in data.get("output") or []:
+            if not isinstance(item, dict) or item.get("type") != "message":
+                continue
+            for content in item.get("content") or []:
+                if (
+                    isinstance(content, dict)
+                    and content.get("type") == "output_text"
+                    and content.get("text")
+                ):
+                    chunks.append(str(content["text"]))
+        return "".join(chunks).strip()
+
+    async def _invoke(
+        self, user_prompt: str, *, system_prompt: str | None = None,
+    ) -> str:
+        if not self.api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY is not set — OpenAIBackend cannot make requests."
+            )
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "instructions": system_prompt or _OPENAI_SYSTEM_PROMPT,
+            "input": user_prompt,
+            "max_output_tokens": self.max_output_tokens,
+            "text": {"format": {"type": "json_object"}},
+        }
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            try:
+                response = await client.post(
+                    f"{self.base_url}/responses", json=payload, headers=headers,
+                )
+                response.raise_for_status()
+            except httpx.ConnectError as exc:
+                raise RuntimeError(f"Cannot reach OpenAI at {self.base_url}: {exc}") from exc
+            except httpx.HTTPStatusError as exc:
+                raise RuntimeError(
+                    f"OpenAI API error {exc.response.status_code}: {exc.response.text[:500]}"
+                ) from exc
+
+        data = response.json()
+        usage = data.get("usage") or {}
+        details = usage.get("input_tokens_details") or {}
+        self._usage.append({
+            "model": self.model,
+            "input_tokens": int(usage.get("input_tokens", 0) or 0),
+            "output_tokens": int(usage.get("output_tokens", 0) or 0),
+            "cache_read_tokens": int(details.get("cached_tokens", 0) or 0),
+            "cache_write_tokens": 0,
+        })
+        raw = self._response_text(data)
+        if not raw:
+            incomplete = data.get("incomplete_details") or {}
+            raise RuntimeError(
+                "OpenAI returned no output text "
+                f"(status={data.get('status')!r}, reason={incomplete.get('reason')!r})."
+            )
+        return raw
+
+    async def extract_json(
+        self, prompt: str, *, system_prompt: str | None = None,
+    ) -> dict[str, Any]:
+        return parse_json_object(
+            await self._invoke(prompt, system_prompt=system_prompt)
+        )
+
+    async def extract_classes(
+        self,
+        text: str,
+        prior: ClassExtraction,
+        *,
+        candidate_class_names: list[str] | None = None,
+    ) -> ClassExtraction:
+        prompt = (
+            self._class_prompt
+            .replace("{previous_context}", render_previous_context(prior))
+            .replace(
+                "{known_classes}",
+                render_known_classes(prior, candidates=candidate_class_names),
+            )
+            .replace("{text}", text)
+        )
+        return parse_class_json(await self._invoke(prompt))
+
+    async def extract_objects(
+        self,
+        text: str,
+        schema: ClassExtraction,
+        prior: ObjectExtraction,
+        *,
+        candidate_object_names: list[str] | None = None,
+        max_classes_in_prompt: int | None = None,
+        class_mention_counts: dict[str, int] | None = None,
+        reenrich: bool = False,
+    ) -> ObjectExtraction:
+        if not schema.classes:
+            return ObjectExtraction()
+        prompt = (
+            self._object_prompt
+            .replace(
+                "{class_schema}",
+                render_class_schema(
+                    schema,
+                    max_classes=max_classes_in_prompt,
+                    class_mention_counts=class_mention_counts,
+                ),
+            )
+            .replace(
+                "{known_objects}",
+                render_known_objects(
+                    prior, schema=schema, candidates=candidate_object_names,
+                ),
+            )
+            .replace("{reenrich_directive}", _REENRICH_DIRECTIVE if reenrich else "")
+            .replace("{text}", text)
+        )
+        return parse_object_json(await self._invoke(prompt), schema)
+
+    async def check_health(self) -> dict[str, Any]:
+        if not self.api_key:
+            return {
+                "openai_reachable": False,
+                "model": self.model,
+                "error": "OPENAI_API_KEY is not set",
+            }
+        headers = {"Authorization": f"Bearer {self.api_key}"}
+        async with httpx.AsyncClient(timeout=min(self.timeout, 30.0)) as client:
+            try:
+                response = await client.get(
+                    f"{self.base_url}/models/{self.model}", headers=headers,
+                )
+                response.raise_for_status()
+            except Exception as exc:  # noqa: BLE001
+                return {
+                    "openai_reachable": False,
+                    "model": self.model,
+                    "error": str(exc),
+                }
+        return {"openai_reachable": True, "model": self.model}
 
 
 # ----------------------------------------------------------------------------

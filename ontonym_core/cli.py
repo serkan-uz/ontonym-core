@@ -43,7 +43,7 @@ def extract_cmd(  # noqa: D401
     backend: str = typer.Option(
         "ollama",
         "--backend",
-        help="LLM backend: 'ollama' (local, default) or 'anthropic' (hosted).",
+        help="LLM backend: ollama, anthropic, deepseek, or openai.",
     ),
     text: str | None = typer.Option(
         None,

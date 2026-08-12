@@ -96,11 +96,30 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ontonym-core extract --text "..." --backend anthropic
 ```
 
+## Quickstart — OpenAI Responses API
+
+OpenAI support uses the existing `httpx` dependency, so no SDK extra is needed.
+
+```bash
+export OPENAI_API_KEY=sk-...
+export OPENAI_MODEL=gpt-5-mini  # optional; this is the default
+
+ontonym-core extract --text "..." --backend openai
+ontonym-core health --backend openai
+```
+
 ## Python API
 
 ```python
 import asyncio
-from ontonym_core import extract, extract_classes, extract_json, extract_objects, OllamaBackend
+from ontonym_core import (
+    OllamaBackend,
+    OpenAIBackend,
+    extract,
+    extract_classes,
+    extract_json,
+    extract_objects,
+)
 
 # One-shot: class pass + object pass against the resulting schema.
 result = asyncio.run(extract(
@@ -122,6 +141,10 @@ stances = asyncio.run(extract_json(
     backend=backend,
     system_prompt="Return a valid JSON object only.",
 ))
+
+# OpenAI uses the Responses API and OPENAI_API_KEY by default.
+openai_backend = OpenAIBackend(model="gpt-5-mini")
+rules = asyncio.run(extract_json("Extract rules as JSON", backend=openai_backend))
 ```
 
 The result models are plain Pydantic — `.model_dump_json()` for JSON, `.model_dump()` for dicts, and full type hints for IDE autocomplete.

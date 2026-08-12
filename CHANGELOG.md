@@ -2,6 +2,17 @@
 
 All notable changes to ontonym-core will be documented here.
 
+## 0.6.0 — 2026-08-12
+
+- `OpenAIBackend` (Responses API, structured JSON output) joins Ollama /
+  Anthropic / DeepSeek behind the same interface.
+- Relationships support `inverse_type`; known-objects rendering is grouped
+  by class with strong-candidate reuse directives.
+- `datetime` joins the data_type vocabulary. Extraction prompts now carry
+  VALUE FORMATS rules (dates YYYY-MM-DD, datetimes "YYYY-MM-DD HH:MM",
+  time-only values banned) and a PROPERTY REUSE RULE that forbids minting
+  synonym properties (`scheduled_time` next to `start_time`).
+
 ## 0.5.0 — 2026-07-09
 
 Per-call token usage is now reported to callers. Backwards-compatible — a new

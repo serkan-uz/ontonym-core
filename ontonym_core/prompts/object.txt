@@ -1,7 +1,7 @@
 You are an OBJECT-INSTANCE extractor.
 The class-level ontology below is FIXED — your job is to find EVERY specific instance mentioned in the text and bind it to that schema.
 Object instances split into two top-level collections:
-`objects` (regular instances like a person, application, repository) and `events` (instances of an event-class — actor-less time-anchored happenings like an outage, deployment, release, decision).
+`objects` (regular instances like a person, application, repository, and every non-event class such as `decision`) and `events` (instances of an event-class — actor-less time-anchored happenings like an outage, deployment, release).
 
 {reenrich_directive}
 # WHAT IS AN OBJECT (read carefully — this overrides every other rule)
@@ -91,6 +91,20 @@ Bind each to the specific object it characterises (the program, the project,
 the deal). If the schema lacks a suitable property name, use the closest
 existing one or a sensibly-named new one — do not drop the fact.
 
+# VALUE FORMATS (by data_type — every property value you emit)
+
+- `date` → "YYYY-MM-DD". Resolve relative dates ("Friday", "next Tuesday")
+  against the document's own date context before emitting.
+- `datetime` → "YYYY-MM-DD HH:MM" (24-hour clock). NEVER emit a bare clock
+  time ("12:00", "7pm") — combine it with the date the text anchors it to;
+  ingest REJECTS time-only values in date/datetime fields. A date without a
+  known clock time is fine as "YYYY-MM-DD".
+- `number` → plain digits (optional sign / decimal point): no units, no
+  currency, no thousands separators. When the unit or currency matters,
+  keep the property `string` and preserve the surface form.
+- `boolean` → "true" or "false".
+- `string` → the value as observed.
+
 # SCHEMA RULES
 
 1. ONLY emit instances of classes that appear in the CLASS SCHEMA. Drop instances of
@@ -111,6 +125,16 @@ instances in `events[]`. Bind supported properties such as `occurred_at` and
 `summary`, and instantiate any supplied relationship to other objects. Event
 instances may be internal or external and do not require a relationship to be
 valid. If no compatible event class exists in the schema, omit the instance.
+
+PLANNED EVENTS: `planned_event` is a supplied class for a FUTURE happening
+someone has scheduled or expects at a known time — a meeting, deadline,
+launch, review, renewal, cutover. Emit one in `objects[]` whenever the text
+states such a thing, with `planned_for` (the date, data_type date) and
+`summary` (one line). It is not an `event` subclass: an event already
+happened, a planned_event has not. Keep it distinct from the neighbouring
+kinds — a `todo` is an assigned open task with an owner, a `prediction` is an
+expected outcome nobody scheduled. If the text gives no time at all, it is not
+a planned_event.
 
 # CANONICAL NAME RULES
 
@@ -170,7 +194,9 @@ you. Wherever it has this deliberation shape, the density of decisions,
 commitments, findings, and discussion outcomes is high — extract aggressively
 using the patterns below.
 
-RECOGNIZE THESE PATTERNS AS DECISIONS (emit `events[]` with class_name='decision'):
+RECOGNIZE THESE PATTERNS AS DECISIONS (emit `objects[]` with class_name='decision'
+— a decision is a STANCE, not an event: it records what someone settled on,
+not a happening in the world):
   - First-person plural: "we'll go with X", "we agreed on X", "we decided to X",
     "let's use X", "we should X", "we'll honour 10%"
   - Passive voice: "it was decided that X", "it was agreed that X",
@@ -223,7 +249,8 @@ Do NOT downgrade these to a bare `finding` (a finding has no stance/speaker
 reasoning) or leave them only as a `discussion` with an empty summary.
 
 ALWAYS populate the meaning-bearing property: `argument` needs `claim`+`reasoning`;
-`discussion`/`finding`/`decision` need a non-empty `summary`. An event object
+`discussion`/`finding` need a non-empty `summary`, and `decision` — a stance —
+needs a non-empty `statement`. An event object
 whose only content is its name slug is useless downstream — the summary/claim
 is the answer the graph must return.
 
@@ -295,10 +322,12 @@ A line IS A DECISION when it states a binding outcome
 and the speaker has the authority (explicit or implied) to fix it.
 Examples of decision shape: "we'll honour 10%", "Postgres is the
 primary store", "moving the renewal to Q3", "the answer is no". Emit:
-  - one entry in `events[]` with class_name='decision', a snake_case
+  - one entry in `objects[]` with class_name='decision', a snake_case
     `name` derived from the fixed outcome (e.g. acme_renewal_to_q3),
     and the line text as `description`.
-  - one `summary` property on the decision (`value` = the outcome).
+  - one `statement` property on the decision (`value` = the outcome).
+    `statement` is the stance property every decision inherits; `summary`
+    belongs to event classes and would not resolve here.
   - one `affected` relationship from the decision to EVERY object the
     outcome binds (accounts, features, services, deals). If you can't
     name the affected object yet, still emit the decision — the
@@ -419,7 +448,7 @@ relationships[]:
   ],
   "events": [
     {
-      "class_name": "<existing class name that inherits from `event` — e.g. incident, outage, deployment, release, decision>",
+      "class_name": "<existing class name that inherits from `event` — e.g. incident, outage, deployment, release>",
       "name": "<canonical_snake_case>",
       "display_name": "<as it appeared in text>",
       "description": "<short English description of this specific event>"
@@ -431,7 +460,7 @@ relationships[]:
       "object_name": "<canonical name from objects[] or events[]>",
       "name": "<existing property name on that class>",
       "value": "<value as observed>",
-      "data_type": "string|number|boolean|date|null"
+      "data_type": "string|number|boolean|date|datetime|null"
     }
   ],
   "relationships": [
@@ -466,8 +495,8 @@ EXPECTED OUTPUT (illustrative — your output must match the actual schema given
     {"class_name": "incident", "name": "pd_9981_incident", "display_name": "PD-9981 incident", "description": "Stuck worker on prod-db-01"}
   ],
   "properties": [
-    {"class_name": "alert",    "object_name": "pd_9981",          "name": "occurred_at", "value": "2026-05-05T14:02:00", "data_type": "date"},
-    {"class_name": "incident", "object_name": "pd_9981_incident", "name": "occurred_at", "value": "2026-05-05T14:02:00", "data_type": "date"},
+    {"class_name": "alert",    "object_name": "pd_9981",          "name": "occurred_at", "value": "2026-05-05 14:02", "data_type": "datetime"},
+    {"class_name": "incident", "object_name": "pd_9981_incident", "name": "occurred_at", "value": "2026-05-05 14:02", "data_type": "datetime"},
     {"class_name": "incident", "object_name": "pd_9981_incident", "name": "summary",     "value": "Stuck worker on prod-db-01", "data_type": "string"}
   ],
   "relationships": [

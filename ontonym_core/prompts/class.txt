@@ -27,10 +27,10 @@ The output object MUST contain exactly two top-level keys: `classes` and
 Schema:
 {
   "classes": [
-    {"name": "snake_case_class_name", "description": "short English description of the class", "inherited_from": "parent_class_name_or_null", "properties": [{"name": "property_name", "data_type": "string|number|boolean|date|null"}]}
+    {"name": "snake_case_class_name", "description": "short English description of the class", "inherited_from": "parent_class_name_or_null", "properties": [{"name": "property_name", "data_type": "string|number|boolean|date|datetime|null"}]}
   ],
   "relationships": [
-    {"source": "source_class", "target": "target_class", "type": "relation_type", "description": "short English description"}
+    {"source": "source_class", "target": "target_class", "type": "relation_type", "inverse_type": "reverse_relation_type", "description": "short English description"}
   ]
 }
 
@@ -139,6 +139,23 @@ Output ONLY entities that are NEW relative to KNOWN CLASSES + PREVIOUS CONTEXT b
 Re-emissions waste output tokens — downstream callers deduplicate anyway.
 Empty arrays are valid and expected when the text introduces nothing new.
 If literally nothing in this chunk is new, return both arrays empty.
+
+PROPERTY REUSE RULE (CRITICAL — this is how near-duplicate columns are born):
+before adding a property to a class, scan that class's EXISTING properties
+(KNOWN CLASSES below) for one that already means the same thing, and reuse its
+exact name. NEVER introduce a synonym or spelling variant of an existing
+property: if the class has `start_time`, do not add `scheduled_time`,
+`begins_at`, or `time` for the same fact — the object pass records the value
+under `start_time`. A new property name is justified ONLY when the fact is
+genuinely not expressible through any existing property on the class (or an
+ancestor).
+
+DATA TYPES: `date` = calendar date (values YYYY-MM-DD); `datetime` = a moment
+with a clock time (values "YYYY-MM-DD HH:MM", 24h); `number` = unitless
+numeric; `boolean` = true/false; `string` = everything else (amounts that must
+keep a unit/currency stay string). Type the property by what it MEANS, not by
+one sample value: a start/end/scheduled-moment fact is `datetime` even when
+the text happens to mention only the clock time.
 
 DISTINCT CONCEPTS RULE: do NOT collapse distinct concepts into one class. If the text
 mentions a "team", emit class `team`. If it mentions a "company", emit class `company`. If
@@ -278,6 +295,12 @@ FORMAT RULES:
    `properties` key. The owning class is implicit (the parent object).
 4. Every relationship's "source" and "target" must
    reference classes in the classes list.
+4b. INVERSE LABEL. `type` reads SOURCE→TARGET; `inverse_type` is the SAME
+   link read TARGET→SOURCE, so the other end can be described in its own
+   words instead of "incoming type". `parent_of` → `child_of`, `employs` →
+   `employed_by`, `covers` → `covered_by`. When the link reads the same from
+   both ends (`competes_with`, `married_to`, `contradicts`), repeat `type`.
+   snake_case like `type`. Use null only when no sensible reverse exists.
 5. Properties have no "value" field — at class level we record only that a property exists
    on the class, not its specific value on any instance.
 5b. QUANTITATIVE, TEMPORAL & IDENTIFIER PROPERTIES: when the text states a
@@ -315,8 +338,8 @@ EXAMPLE EXTRACTION:
     {"name": "post_mortem", "description": "A retrospective document for an incident", "inherited_from": null, "properties": [{"name": "due_within_hours", "data_type": "number"}]}
   ],
   "relationships": [
-    {"source": "alert", "target": "incident", "type": "triggers", "description": "An alert triggers an incident"},
-    {"source": "post_mortem", "target": "incident", "type": "covers", "description": "A post-mortem covers one incident"}
+    {"source": "alert", "target": "incident", "type": "triggers", "inverse_type": "triggered_by", "description": "An alert triggers an incident"},
+    {"source": "post_mortem", "target": "incident", "type": "covers", "inverse_type": "covered_by", "description": "A post-mortem covers one incident"}
   ]
 }
 

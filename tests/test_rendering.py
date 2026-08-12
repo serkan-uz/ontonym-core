@@ -126,8 +126,9 @@ def test_known_objects_without_candidates_unchanged():
     )
     out = render_known_objects(prior)
     assert "STRONG CANDIDATE OBJECTS" not in out
-    assert "person:sarah" in out
-    assert "incident:pd_9981" in out
+    # Grouped-by-class rendering: "  <class>: <name>[, <name>...]"
+    assert "person: sarah" in out
+    assert "incident: pd_9981" in out
 
 
 def test_known_objects_with_candidates_renders_preamble():
@@ -136,8 +137,8 @@ def test_known_objects_with_candidates_renders_preamble():
     assert out.startswith("STRONG CANDIDATE OBJECTS")
     assert "alice, bob" in out
     # base list still rendered after the preamble
-    assert "Objects:" in out
-    assert "person:alice" in out
+    assert "KNOWN OBJECTS" in out
+    assert "person: alice" in out
 
 
 def test_known_objects_empty_prior_with_candidates():

@@ -18,10 +18,10 @@ from __future__ import annotations
 import os
 from typing import Any, Literal
 
-from .llm import AnthropicBackend, Backend, DeepSeekBackend, OllamaBackend
+from .llm import AnthropicBackend, Backend, DeepSeekBackend, OllamaBackend, OpenAIBackend
 from .schema import ClassExtraction, Extraction, ObjectExtraction
 
-BackendName = Literal["ollama", "anthropic", "deepseek"]
+BackendName = Literal["ollama", "anthropic", "deepseek", "openai"]
 BackendLike = Backend | BackendName
 
 
@@ -41,9 +41,14 @@ def _resolve_backend(backend: BackendLike) -> Backend:
                 model=os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
                 base_url=os.getenv("DEEPSEEK_URL", "https://api.deepseek.com"),
             )
+        if backend == "openai":
+            return OpenAIBackend(
+                model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+                base_url=os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            )
         raise ValueError(
             f"Unknown backend name {backend!r}. Use 'ollama', 'anthropic', "
-            "'deepseek', or pass a Backend instance."
+            "'deepseek', 'openai', or pass a Backend instance."
         )
     return backend
 
