@@ -89,7 +89,10 @@ high-value for Q&A and easy to miss:
     as noise.
 Bind each to the specific object it characterises (the program, the project,
 the deal). If the schema lacks a suitable property name, use the closest
-existing one or a sensibly-named new one — do not drop the fact.
+existing one (own or inherited); if none exists at all, fold the fact into the
+object's `description` — NEVER invent a property name here: ingest silently
+drops values on undeclared properties, so an invented name loses the very fact
+you were saving. (The classes pass is where missing properties get declared.)
 
 # VALUE FORMATS (by data_type — every property value you emit)
 
@@ -107,12 +110,28 @@ existing one or a sensibly-named new one — do not drop the fact.
 
 # SCHEMA RULES
 
-1. ONLY emit instances of classes that appear in the CLASS SCHEMA. Drop instances of
-   unknown classes (do not invent classes here — class extraction is a separate phase).
-2. ONLY emit property names that are defined on the relevant class.
-3. ONLY emit relationship types that exist in the schema.
+1. ONLY emit instances of classes that appear in the CLASS SCHEMA. When you
+   produced a classes pass in THIS same extraction, its output COUNTS AS PART
+   OF the schema: the server ingests your classes pass before this one, so
+   instances of the classes you just declared are valid and REQUIRED — do not
+   drop an instance because its class is too new to appear in the schema text
+   below. Drop instances of classes found in neither place (do not invent
+   classes here — class extraction is a separate phase).
+2. ONLY emit property names that are defined on the relevant class — own,
+   inherited, or declared in your own classes pass.
+3. ONLY emit relationship types that exist in the schema or in your own
+   classes pass. `source` and `target` are CANONICAL snake_case names from
+   `objects[]`, `events[]`, or KNOWN OBJECTS — never display names, never
+   free text: an endpoint that resolves to no object is dropped at ingest.
 4. If the schema is missing a class, property, or relationship you wish you had, OMIT that detail
    silently — do not invent.
+5. MOST-SPECIFIC CLASS: when more than one schema class could hold an
+   instance (a parent and its child, or a broad kind next to a precise one),
+   bind it to the most specific class whose definition it truly satisfies —
+   never to a nearby-but-wrong kind. With both `university` and `company`
+   available, MIT binds to `university`, never `company`; with `organisation`
+   and `regulator`, a regulator binds to `regulator`. Class choice follows
+   what the thing IS, not which class is more familiar or more populated.
 
 INHERITANCE: when a class entry in the schema below has an `inherits: <parent>` line, that
 class transparently owns every property/relationship of its parent (and that

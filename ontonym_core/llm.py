@@ -76,6 +76,19 @@ stricter pass skipped.
 """
 
 
+def read_prompt(name: str) -> str:
+    """Raw text of a bundled extraction prompt template: 'class' or 'object'.
+
+    Public so downstream apps that render these templates themselves (e.g. a
+    BYO / remote-LLM flow serving prompts to a caller's model) use the SAME
+    canonical files instead of carrying a copy.
+    """
+    path = _PROMPTS_DIR / f"{name}.txt"
+    if not path.is_file():
+        raise ValueError(f"unknown prompt template {name!r}")
+    return path.read_text(encoding="utf-8")
+
+
 # ----------------------------------------------------------------------------
 # Backend protocol
 # ----------------------------------------------------------------------------

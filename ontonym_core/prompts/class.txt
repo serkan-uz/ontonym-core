@@ -43,7 +43,10 @@ Common starter classes (reuse when they fit, invent more specific ones when need
 CLASS REUSE RULE: prefer reusing a class already used in this session over inventing a
 synonym (e.g. don't introduce "tool" when "technology" already exists). Classes already used
 in this session are listed under KNOWN CLASSES below; use them as the strong default and
-only invent a new class when none fits.
+only invent a new class when none fits. Reuse collapses SYNONYMS of the same kind —
+it NEVER licenses filing an instance under a class whose definition it does not
+satisfy (see KIND FIDELITY RULE below): a university dropped into `company`
+because `company` already existed is a modelling error, not economy.
 
 TODO / ACTION-ITEM CLASS — allowed, but collapse to exactly ONE class named
 `todo`. When the text contains genuine things-someone-still-has-to-do — an
@@ -161,6 +164,33 @@ DISTINCT CONCEPTS RULE: do NOT collapse distinct concepts into one class. If the
 mentions a "team", emit class `team`. If it mentions a "company", emit class `company`. If
 it mentions a "department", emit class `department`. These are related but DIFFERENT
 classes — never merge them under a generic umbrella class like `organisation`.
+
+KIND FIDELITY RULE (reuse never overrides truth): every instance must land in a
+class whose DEFINITION it genuinely satisfies. When the best existing class is a
+nearby-but-wrong kind, emitting the correct new class is REQUIRED, not optional —
+the CLASS REUSE and DO-NOT-OVER-SPECIALISE rules govern synonyms and topic
+qualifiers of ONE kind; they never justify collapsing genuinely different kinds.
+Institutional kinds are the classic failure — none of these is a `company`:
+  - a university, school, or academy → `university` / `school`
+  - a government department, agency, or regulator → `government_body` / `regulator`
+  - a central bank → `central_bank`
+  - a charity, foundation, or NGO → `charity` / `ngo`
+  - a professional body, industry council, or standards consortium →
+    `professional_body` / `industry_body`
+Normative kinds likewise — a statute is not a treaty is not a voluntary
+standard: `law`, `international_agreement`, `standard` are distinct classes
+(a shared parent like `framework` via `inherited_from` is fine).
+Keep each kind its OWN class; when several sibling kinds appear, giving them a
+common parent via `inherited_from` (e.g. `organisation`) is welcome — that is
+inheritance, not merging. Mechanical test: compare defining properties and
+lifecycle, not surface similarity. A company has an industry, customers,
+revenue; a university has faculties and students; a regulator issues rules and
+enforcement actions. If the defining behaviours differ, it is a different kind —
+emit the correct class even when a broader class is already in KNOWN CLASSES.
+This rule also applies RETROACTIVELY to the schema you are shown: when KNOWN
+CLASSES reveals that earlier extraction filed a different kind under a broad
+class, still emit the correct class for the instances in front of you — do not
+propagate the earlier flattening for consistency's sake.
 
 ENTITY vs ROLE/FACET RULE: a real-world THING and a ROLE that another party holds toward
 it are DIFFERENT classes — never fold the role into the thing. A company and your

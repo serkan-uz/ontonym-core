@@ -27,6 +27,7 @@ from .llm import (
     parse_class_json,
     parse_json_object,
     parse_object_json,
+    read_prompt,
     render_class_schema,
     render_known_classes,
     render_known_objects,
@@ -70,6 +71,7 @@ __all__ = [
     "parse_json_object",
     "parse_object_json",
     # Prompt rendering helpers (for callers building their own prompts on top)
+    "read_prompt",
     "render_known_classes",
     "render_previous_context",
     "render_class_schema",
