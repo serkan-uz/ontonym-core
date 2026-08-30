@@ -2,6 +2,14 @@
 
 All notable changes to ontonym-core will be documented here.
 
+## 0.7.1 — 2026-08-30
+
+- Object prompt gains a FINAL SWEEP block: after drafting output, re-scan the
+  text for calendar-worthy (dated) and reminder-worthy (due-dated) items and
+  emit the temporal properties that surface them downstream. Class prompt
+  gains the matching TEMPORAL ANCHORS RULE so due-type properties get
+  declared on the class.
+
 ## 0.7.0 — 2026-08-30
 
 - `render_known_classes` gains `max_classes` / `class_mention_counts`: over

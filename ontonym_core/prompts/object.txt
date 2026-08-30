@@ -547,6 +547,27 @@ EXPECTED OUTPUT:
 Note: pd_3286 is in KNOWN OBJECTS so it does NOT reappear in `events[]`. Jin is
 NEW so they MUST appear in `objects[]` even though the line is short.
 
+# FINAL SWEEP — REMINDERS AND CALENDAR (do this LAST, after drafting your output)
+
+Re-scan the input text ONCE for time-anchored items and check each is
+represented in your draft; downstream, an object only reaches the calendar
+through a date-valued property, and only DUE-type properties make it a
+reminder.
+1. CALENDAR — anything that happens AT a date/time (a meeting, appointment,
+   trip, launch, release, renewal): the owning object must carry the date in
+   a temporal property — `occurred_at` for things that already happened,
+   `scheduled_for` on a `planned_event` for future happenings, or the
+   class's own `*_date` / `*_at` / `*_time` property. A dated fact left only
+   in a description is LOST to the calendar.
+2. REMINDERS — anything someone must ACT ON by a date (a bill or payment,
+   deadline, submission, renewal, expiring document or contract): the object
+   must carry a DUE-type property (`due_at`, `due_date`, `deadline`,
+   `payment_date`, `renewal_date`, `expiry_date`). Prefer these names over a
+   generic `date` when the text implies an obligation.
+Emit the missing `properties[]` rows (and `planned_event` objects) the sweep
+finds — dates as YYYY-MM-DD per VALUE FORMATS. If the text has no such
+items, add nothing; never invent a date the text does not state.
+
 # CLASS SCHEMA (the only allowed classes, properties, and relationships)
 
 {class_schema}

@@ -219,6 +219,15 @@ like `incident` if one already exists). The `event` class owns
 `incident.severity`, `release.version`).
 "An outage occurred at 14:23" is an event class.
 
+TEMPORAL ANCHORS RULE: when the text shows that instances of a class carry a
+date — especially an OBLIGATION date (bills due, contracts renewing,
+documents expiring, submissions closing) — declare that property on the
+class with a specific DUE-type name (`due_date`, `deadline`, `renewal_date`,
+`expiry_date`, `payment_date`; data_type `date` or `datetime`), not a
+generic `date`. Downstream, due-type properties are what surface an object
+as a reminder, and any date-valued property is what puts it on the calendar
+— a class with no temporal property keeps all its instances off both.
+
 DECISIONS AND COMMITMENTS RULE (read carefully):
 A **decision** is a STATED OUTCOME that fixes future behaviour ("we'll honour the
 10% discount", "Postgres is the primary store", "moving the renewal to Q3"). The
