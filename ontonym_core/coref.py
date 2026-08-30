@@ -32,7 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-from typing import Optional, Protocol
+from typing import Protocol
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +181,7 @@ class _SpacyCoref:
         return text
 
 
-def get_coref_resolver() -> Optional[CorefResolver]:
+def get_coref_resolver() -> CorefResolver | None:
     """Build the coref resolver named by COREF_BACKEND, or None when off.
 
     Returns None for unset/"none"/"off" so callers can cheaply skip the pass

@@ -326,13 +326,16 @@ def _focus_classes(schema: ClassExtraction) -> set[str]:
         anc = parent.get(name)
         guard: set[str] = set()
         while anc and anc not in guard:
-            guard.add(anc); focus.add(anc); anc = parent.get(anc)
+            guard.add(anc)
+            focus.add(anc)
+            anc = parent.get(anc)
         stack = list(children.get(name, []))
         while stack:
             d = stack.pop()
             if d in focus:
                 continue
-            focus.add(d); stack.extend(children.get(d, []))
+            focus.add(d)
+            stack.extend(children.get(d, []))
     return focus
 
 
