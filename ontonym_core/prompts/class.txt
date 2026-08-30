@@ -375,6 +375,7 @@ EXAMPLE EXTRACTION:
 
 KNOWN CLASSES (already used in this session — reuse these unless none fits):
 {known_classes}
+{resolver_directive}
 
 PREVIOUS CONTEXT (classes and relationships already extracted in this session):
 {previous_context}

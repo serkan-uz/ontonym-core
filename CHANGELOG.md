@@ -2,6 +2,16 @@
 
 All notable changes to ontonym-core will be documented here.
 
+## 0.7.0 — 2026-08-30
+
+- `render_known_classes` gains `max_classes` / `class_mention_counts`: over
+  the cap, the top-N by mention count are named and the tail collapses to a
+  count pointing at the resolve tool. Default (`None`) renders everything —
+  existing callers are byte-identical.
+- New `{resolver_directive}` placeholder in `class.txt` / `object.txt` for
+  callers that supply entity context via a resolve tool instead of embedding
+  name lists; all built-in backends fill it empty.
+
 ## 0.6.0 — 2026-08-12
 
 - `OpenAIBackend` (Responses API, structured JSON output) joins Ollama /

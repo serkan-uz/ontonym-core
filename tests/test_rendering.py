@@ -146,3 +146,35 @@ def test_known_objects_empty_prior_with_candidates():
     assert out.startswith("STRONG CANDIDATE OBJECTS")
     assert "alice" in out
     assert "(none yet)" in out
+
+
+# ----------------------------------------------------------------------------
+# max_classes cap (MCP extraction path — bounded prompts)
+# ----------------------------------------------------------------------------
+
+
+def test_known_classes_cap_ranks_by_mentions_and_collapses_tail():
+    prior = ClassExtraction(
+        classes=[Class(name=f"cls_{i}") for i in range(10)]
+    )
+    counts = {"cls_7": 5, "cls_3": 4, "cls_9": 3}
+    out = render_known_classes(prior, max_classes=3, class_mention_counts=counts)
+    assert "cls_7" in out and "cls_3" in out and "cls_9" in out
+    assert "cls_0" not in out.split("... and")[0]
+    assert "... and 7 more not shown" in out
+    assert "resolve tool" in out
+
+
+def test_known_classes_no_cap_is_byte_identical_to_default():
+    prior = ClassExtraction(
+        classes=[Class(name="person"), Class(name="team")]
+    )
+    assert render_known_classes(prior) == render_known_classes(
+        prior, max_classes=None, class_mention_counts={"person": 9})
+
+
+def test_known_classes_cap_not_exceeded_no_tail():
+    prior = ClassExtraction(classes=[Class(name="a"), Class(name="b")])
+    out = render_known_classes(prior, max_classes=5)
+    assert "more not shown" not in out
+    assert "a" in out and "b" in out

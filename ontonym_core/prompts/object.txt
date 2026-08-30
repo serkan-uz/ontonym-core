@@ -554,6 +554,7 @@ NEW so they MUST appear in `objects[]` even though the line is short.
 # KNOWN OBJECTS (already extracted in this session — REUSE these canonical names; do not duplicate)
 
 {known_objects}
+{resolver_directive}
 
 # INPUT TEXT
 #

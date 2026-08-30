@@ -145,6 +145,8 @@ def render_known_classes(
     prior: ClassExtraction,
     *,
     candidates: list[str] | None = None,
+    max_classes: int | None = None,
+    class_mention_counts: dict[str, int] | None = None,
 ) -> str:
     """Render the known-classes hint for the class-pass prompt.
 
@@ -154,12 +156,32 @@ def render_known_classes(
     as a secondary "All registered classes" line — the candidate list is a
     *hint*, not a constraint. The caller is responsible for ranking; this
     helper trusts whatever order it receives.
+
+    `max_classes` bounds the rendered list so the prompt stays a fixed size
+    on huge schemas: the top-N by `class_mention_counts` (insertion order on
+    ties, same ranking as `render_class_schema`) are named and the tail
+    collapses to a count with a pointer at the resolve tool. `None` (the
+    default) renders everything — the server-side extraction path relies on
+    that staying byte-identical.
     """
+    shown = prior.classes
+    tail_note = ""
+    if max_classes is not None and len(prior.classes) > max_classes:
+        counts = class_mention_counts or {}
+        shown = sorted(
+            prior.classes, key=lambda c: counts.get(c.name, 0), reverse=True
+        )[:max_classes]
+        tail_note = (
+            f" ... and {len(prior.classes) - max_classes} more not shown — "
+            "before minting a class, check whether one already exists with "
+            "the resolve tool"
+        )
     full = (
         ", ".join(
             f"{c.name} (inherits {c.inherited_from})" if c.inherited_from else c.name
-            for c in prior.classes
+            for c in shown
         )
+        + tail_note
         if prior.classes
         else "(none yet — no constraint, pick whatever class fits)"
     )
@@ -806,6 +828,7 @@ class OllamaBackend:
         prompt = (
             self._class_prompt
             .replace("{previous_context}", render_previous_context(prior))
+            .replace("{resolver_directive}", "")
             .replace(
                 "{known_classes}",
                 render_known_classes(prior, candidates=candidate_class_names),
@@ -845,6 +868,7 @@ class OllamaBackend:
                 ),
             )
             .replace("{reenrich_directive}", _REENRICH_DIRECTIVE if reenrich else "")
+            .replace("{resolver_directive}", "")
             .replace("{text}", text)
         )
         raw = await self._generate(prompt)
@@ -1023,6 +1047,7 @@ class AnthropicBackend:
         prompt = (
             self._class_prompt
             .replace("{previous_context}", render_previous_context(prior))
+            .replace("{resolver_directive}", "")
             .replace(
                 "{known_classes}",
                 render_known_classes(prior, candidates=candidate_class_names),
@@ -1062,6 +1087,7 @@ class AnthropicBackend:
                 ),
             )
             .replace("{reenrich_directive}", _REENRICH_DIRECTIVE if reenrich else "")
+            .replace("{resolver_directive}", "")
             .replace("{text}", text)
         )
         raw = await self._invoke(prompt)
@@ -1196,6 +1222,7 @@ class OpenAIBackend:
         prompt = (
             self._class_prompt
             .replace("{previous_context}", render_previous_context(prior))
+            .replace("{resolver_directive}", "")
             .replace(
                 "{known_classes}",
                 render_known_classes(prior, candidates=candidate_class_names),
@@ -1234,6 +1261,7 @@ class OpenAIBackend:
                 ),
             )
             .replace("{reenrich_directive}", _REENRICH_DIRECTIVE if reenrich else "")
+            .replace("{resolver_directive}", "")
             .replace("{text}", text)
         )
         return parse_object_json(await self._invoke(prompt), schema)
@@ -1416,6 +1444,7 @@ class DeepSeekBackend:
         prompt = (
             self._class_prompt
             .replace("{previous_context}", render_previous_context(prior))
+            .replace("{resolver_directive}", "")
             .replace(
                 "{known_classes}",
                 render_known_classes(prior, candidates=candidate_class_names),
@@ -1455,6 +1484,7 @@ class DeepSeekBackend:
                 ),
             )
             .replace("{reenrich_directive}", _REENRICH_DIRECTIVE if reenrich else "")
+            .replace("{resolver_directive}", "")
             .replace("{text}", text)
         )
         raw = await self._invoke(prompt)
