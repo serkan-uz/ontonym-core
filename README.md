@@ -205,7 +205,7 @@ The hosted product at ontonym.com depends on `ontonym-core`. Same prompts, same 
 
 - Postgres + pgvector storage with provenance (every fact tied to its source document)
 - Per-tenant isolation + per-row access grants
-- Approval workflow (the "Object Guru" reviews / merges / rejects)
+- Approval workflow (a reviewer approves / merges / rejects)
 - Flow detection across time-ordered actions
 - An MCP server so AI agents read the graph as a tool
 - Slack / Teams / Notion / Salesforce / HubSpot / GitHub / Linear / Jira connectors
