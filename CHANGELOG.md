@@ -2,6 +2,13 @@
 
 All notable changes to ontonym-core will be documented here.
 
+## 0.7.2 — 2026-08-31
+
+- The reminder/calendar block is now a selective FINAL CHECK, not a sweep:
+  only real future obligations become reminders and only genuine scheduled
+  happenings reach the calendar; incidental/past/bookkeeping dates are
+  explicitly excluded. Default outcome is to add nothing.
+
 ## 0.7.1 — 2026-08-30
 
 - Object prompt gains a FINAL SWEEP block: after drafting output, re-scan the

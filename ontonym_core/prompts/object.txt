@@ -547,26 +547,32 @@ EXPECTED OUTPUT:
 Note: pd_3286 is in KNOWN OBJECTS so it does NOT reappear in `events[]`. Jin is
 NEW so they MUST appear in `objects[]` even though the line is short.
 
-# FINAL SWEEP — REMINDERS AND CALENDAR (do this LAST, after drafting your output)
+# FINAL CHECK — REMINDERS AND CALENDAR (do this LAST, after drafting your output)
 
-Re-scan the input text ONCE for time-anchored items and check each is
-represented in your draft; downstream, an object only reaches the calendar
-through a date-valued property, and only DUE-type properties make it a
-reminder.
-1. CALENDAR — anything that happens AT a date/time (a meeting, appointment,
-   trip, launch, release, renewal): the owning object must carry the date in
-   a temporal property — `occurred_at` for things that already happened,
-   `scheduled_for` on a `planned_event` for future happenings, or the
-   class's own `*_date` / `*_at` / `*_time` property. A dated fact left only
-   in a description is LOST to the calendar.
-2. REMINDERS — anything someone must ACT ON by a date (a bill or payment,
-   deadline, submission, renewal, expiring document or contract): the object
-   must carry a DUE-type property (`due_at`, `due_date`, `deadline`,
-   `payment_date`, `renewal_date`, `expiry_date`). Prefer these names over a
-   generic `date` when the text implies an obligation.
-Emit the missing `properties[]` rows (and `planned_event` objects) the sweep
-finds — dates as YYYY-MM-DD per VALUE FORMATS. If the text has no such
-items, add nothing; never invent a date the text does not state.
+Answer two deliberate questions about the input text. Most documents answer
+NO to both — the default outcome of this check is to add NOTHING. This is a
+selection step, not a harvest: it exists to catch the FEW items a reader
+would genuinely want on their calendar or reminder list, not to stamp a date
+on everything.
+
+1. REMINDER CHECK — does the text create a real FUTURE OBLIGATION: something
+   a person must ACT ON by a specific date (a bill to pay, a deadline to
+   meet, a contract renewing, a document expiring, a submission closing)?
+   Only for those, make sure the owning object carries a DUE-type property
+   (`due_at`, `due_date`, `deadline`, `payment_date`, `renewal_date`,
+   `expiry_date`) — these are what surface it as a reminder.
+2. CALENDAR CHECK — does the text contain a genuine SCHEDULED HAPPENING a
+   reader would look up on a calendar: a future meeting, appointment, trip,
+   or launch with a stated date? Only for those, make sure the date is on
+   the object (`scheduled_for` on a `planned_event`, or the class's own
+   scheduled/appointment property).
+
+Explicitly NOT calendar/reminder material — leave these alone (in the
+description if already there, or nowhere): dates of things that already
+happened, dates mentioned in passing (a birthdate in a bio, a founding
+year, a historical reference), bookkeeping/transaction dates, and anything
+whose date carries no action or appointment for a reader. Never invent a
+date the text does not state; dates as YYYY-MM-DD per VALUE FORMATS.
 
 # CLASS SCHEMA (the only allowed classes, properties, and relationships)
 
