@@ -94,6 +94,20 @@ object's `description` — NEVER invent a property name here: ingest silently
 drops values on undeclared properties, so an invented name loses the very fact
 you were saving. (The classes pass is where missing properties get declared.)
 
+# CONCRETE DETAILS ARE NEVER MINOR
+
+A passing mention that binds one instance to another concrete thing —
+equipment carried or fitted, a component installed, a payload flown, a
+variant tested, a tool used, a document referenced — is a FACT to capture,
+not color to drop. "X carried the trial Y interface plate for ground tests
+in March" binds X to Y: emit the relationship when the schema has one that
+fits; otherwise put the fact, with the text's own key phrasing, into the
+`description` of the object it characterises. The read-time test is "what
+was X carrying / fitted with / tested against?" — if your output cannot
+answer that, the detail was lost at the only moment it could be saved.
+Descriptions are the safety net: prefer a description that keeps the text's
+decisive words over a paraphrase that sheds them.
+
 # VALUE FORMATS (by data_type — every property value you emit)
 
 - `date` → "YYYY-MM-DD". Resolve relative dates ("Friday", "next Tuesday")
